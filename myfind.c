@@ -29,12 +29,74 @@ The file type and mode
            S_IFIFO    0010000   FIFO
 */
 
-/*
-    Returns a new char* containing the directory and the file name
-    joined into a valid file path. Caller is responsible for deallocating
-    the returned char*.
-*/
 
+// Globals consider removing
+char* pattern;
+bool debug = true;
+
+// start using struct to store information.
+typedef struct 
+{
+    // for example ../testdir/file.txt
+    // or ./subdir/subsubdir/
+    const char* path;
+    // for example file.txt
+    // subsubdir
+    const char* file_name;
+    bool isdir;
+
+} path_item;
+
+/*
+Returns a new char* containing the directory with the last / removed
+For example ../exampledir/ becomes ../exampledir. Caller is responsible for 
+deallocating returned char*.
+*/
+char* remove_last_slash(const char* directory)
+{
+    return strndup(directory, strlen(directory) - 1);
+}
+
+/*
+
+    For example ../dir/exampledir/ becomes exampledir
+
+*/
+char* dir_path_to_dir_name(const char* directory)
+{
+    char* dir_path_no_slash = remove_last_slash(directory);
+
+    // get pointer to last occurance of char
+    char* start_pos = strrchr(dir_path_no_slash, '/');
+    //printf("debug %s\n", start_pos);
+    // copy str starting from the next char on.
+    char* dir_name = strdup(start_pos + 1);
+    free(dir_path_no_slash);
+    return dir_name;
+}
+
+/*
+    Takes a complete path as an input such as ../testdir/dir/file.txt or ../testdir/otherdir/
+    prints out the path minus the last slash if it is present
+*/
+void print_match(const char* path)
+{
+    int length = strlen(path);
+
+    if(path[length] == '/')
+    {
+        length--;
+    }
+
+    for (int i = 0; i < length; i++)
+    {
+        if(putchar(path[i]) == EOF)
+        {
+            perror("Can't write to stdout");
+        }  
+    }
+
+}
 
 /*
     Returns true if the file_name matches the pattern. The pattern
@@ -42,7 +104,7 @@ The file type and mode
 */
 bool handle_name(const char* pattern, const char* file_name)
 {
-    printf("handling name\n");
+    //printf("handling name with pattern %s\n", pattern);
     return fnmatch(pattern, file_name, 0) == 0;
 }
 
@@ -52,7 +114,7 @@ bool handle_name(const char* pattern, const char* file_name)
 */
 bool handle_mtime()
 {
-    printf("handling mtime\n");
+    //printf("handling mtime\n");
     return true;
 }
 
@@ -62,7 +124,7 @@ bool handle_mtime()
 */
 bool handle_type()
 {
-    printf("handling type\n");
+    //printf("handling type\n");
     return true;
 }
 
@@ -71,7 +133,7 @@ bool handle_type()
 */
 bool handle_exec()
 {
-    printf("handling exec\n");
+    //printf("handling exec\n");
     return true;
 }
 
@@ -80,17 +142,62 @@ bool handle_exec()
 */
 bool handle_print()
 {
-    printf("handling print\n");
+    //printf("handling print\n");
     return true;
 }
 
 bool handle_L()
 {
-    printf("handling L\n");
+    //printf("handling L\n");
     return true;
 }
 
+/*
+    returns true if a file meets the requirements.
+    returns false otherwise.
+*/
+void handle_file(const char* file_name, bool is_dir)
+{
+    if(is_dir)
+    {
+        //misleading file_name in here is actually a path
+        char* dir_file = dir_path_to_dir_name(file_name);
+        char* directory_no_slash = remove_last_slash(file_name);
 
+        if(handle_name(pattern, dir_file))
+        {
+            printf("matched %s\n", directory_no_slash);
+        }
+        free(directory_no_slash);
+        free(dir_file);
+    }
+    else
+    {
+        //printf("handling file %s\n", file_name);
+        if(!handle_name(pattern, file_name))
+        {
+        }
+        /*
+        if(!handle_type(pattern, file_name))
+        {
+            return false;
+        }
+        if(!handle_mtime(pattern, file_name))
+        {
+            return false;
+        }*/
+        else
+        {
+            printf("%s\n", file_name);
+        }
+    }
+}
+
+/*
+    Returns a new char* containing the directory and the file name
+    joined into a valid file path. Caller is responsible for deallocating
+    the returned char*.
+*/
 char* join_path(const char* directory, const char* file_name)
 {
     // one extra space in case we need to add a / later
@@ -107,7 +214,10 @@ void walk_dir(char* directory)
 {
     struct dirent *de;
     struct stat statbuffer;
-    printf("%s\n", directory);
+
+    // Every directory handles it self at the beginning
+    handle_file(directory, true);
+
     DIR* dr = opendir(directory);
 
     if (dr == NULL)
@@ -120,6 +230,7 @@ void walk_dir(char* directory)
         // Check that the current item is not . or ..
         if ( (strcmp(de->d_name, "..") != 0 ) && (strcmp(de->d_name, ".") != 0) )
         {
+            char* file_name = strdup(de->d_name);
             char* path = join_path(directory, de->d_name);
 
             // check if de->d_type is available for performance
@@ -138,8 +249,11 @@ void walk_dir(char* directory)
             }
             else
             {
-                printf("%s\n", path);
+                // None directories are handled here
+                handle_file(file_name, false);
+                //printf("walking %s\n", path);
             }
+            free(file_name);
             free(path);
         }
     }
@@ -178,6 +292,7 @@ char* get_opt_args(char** argv, int index)
 */
 char* parse_args(int argc, char** argv)
 {
+    printf("------------------start parse--------------------\n");
     bool more_start_dirs = true;
     for(int i = 1; i < argc; i++)
     {
@@ -191,7 +306,11 @@ char* parse_args(int argc, char** argv)
 
             if(strcmp(argv[i], "-name") == 0)
             {
-                handle_name(get_opt_args(argv, i), "test");
+                pattern = get_opt_args(argv, i);
+                /* if (handle_name())
+                {
+                    printf("%s matched pattern: \n")
+                } */
             }
             else if(strcmp(argv[i], "-mtime") == 0)
             {
@@ -216,9 +335,10 @@ char* parse_args(int argc, char** argv)
         }
         else
         {
-            printf("%s\n",argv[i]);
+            printf("parsing %s\n",argv[i]);
         }
     }
+    printf("----------------end parse--------------------\n");
 }
 
 
@@ -226,6 +346,6 @@ int main(int argc, char** argv)
 {
 
     parse_args(argc, argv);
-    //walk_dir(argv[1]);
+    walk_dir(argv[1]);
     return 0;
 }
