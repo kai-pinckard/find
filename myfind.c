@@ -4,6 +4,9 @@
 #include <sys/stat.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdbool.h>
+#include <fnmatch.h>
+
 /*
 The file type and mode
        The  stat.st_mode field (for statx(2), the statx.stx_mode field) contains the file type and
@@ -33,35 +36,58 @@ The file type and mode
 */
 
 
-
-bool handle_name()
+/*
+    Returns true if the file_name matches the pattern. The pattern
+    is simply whatever was passed for -name
+*/
+bool handle_name(const char* pattern, const char* file_name)
 {
-
+    printf("handling name\n");
+    return fnmatch(pattern, file_name, 0) == 0;
 }
 
+/*
+    Returns true if the file specified by file_name was modified at
+    mtime. note +/- features not implemented. 
+*/
 bool handle_mtime()
 {
-
+    printf("handling mtime\n");
+    return true;
 }
 
+/*
+    Returns true if the file specified by file_name is of the type
+    passed for -type
+*/
 bool handle_type()
 {
-
+    printf("handling type\n");
+    return true;
 }
 
+/*
+    executes the specified command on all the file specified.
+*/
 bool handle_exec()
 {
-
+    printf("handling exec\n");
+    return true;
 }
 
+/*
+    prints the specified file.
+*/
 bool handle_print()
 {
-
+    printf("handling print\n");
+    return true;
 }
 
 bool handle_L()
 {
-
+    printf("handling L\n");
+    return true;
 }
 
 
@@ -121,8 +147,85 @@ void walk_dir(char* directory)
 }
 
 
+/*
+    Returns true if the str starts with the pattern
+    false otherwise.
+*/
+bool starts_with(const char* str, const char* pattern)
+{
+    for(int i = 0; i < strlen(pattern); i++)
+    {
+        if(str[i] != pattern[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+    Gets the arguments for a particular option.
+    Index the index into argv of the current option.
+    may need to be updated if there are multiple args for an option.
+*/
+char* get_opt_args(char** argv, int index)
+{
+    return argv[index + 1];
+}
+
+/*
+    Returns the next argument fol
+*/
+char* parse_args(int argc, char** argv)
+{
+    bool more_start_dirs = true;
+    for(int i = 1; i < argc; i++)
+    {
+        printf("%s\n",argv[i]);
+
+        // Check if it is an option flag
+        if(starts_with(argv[i], "-"))
+        {
+            more_start_dirs = false;
+            printf("option %s\n", argv[i]);
+
+            if(strcmp(argv[i], "-name") == 0)
+            {
+                handle_name(get_opt_args(argv, i), "test");
+            }
+            else if(strcmp(argv[i], "-mtime") == 0)
+            {
+                handle_mtime();
+            }
+            else if(strcmp(argv[i], "-type") == 0)
+            {
+                handle_type();
+            }
+            else if(strcmp(argv[i], "-exec") == 0)
+            {
+                handle_exec();
+            }
+            else if(strcmp(argv[i], "-print") == 0)
+            {
+                handle_print();   
+            }
+            else if(strcmp(argv[i], "-L") == 0)
+            {
+                handle_L();
+            }
+        }
+        else
+        {
+            printf("%s\n",argv[i]);
+        }
+    }
+}
+
+
 int main(int argc, char** argv)
 {
-    walk_dir(argv[1]);
+
+    parse_args(argc, argv);
+    //walk_dir(argv[1]);
     return 0;
 }
