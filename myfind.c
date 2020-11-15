@@ -31,8 +31,9 @@ The file type and mode
 
 
 // Globals consider removing
+const int NUM_SECS_PER_DAY = 86400;
 char* pattern;
-int num_days;
+int num_days = -1;
 bool debug = true;
 
 // start using struct to store information.
@@ -40,7 +41,7 @@ typedef struct
 {
     // for example ../testdir/file.txt
     // or ./subdir/subsubdir/
-    const char* path;
+    char* path;
     // for example file.txt
     // subsubdir
     const char* file_name;
@@ -121,9 +122,11 @@ bool handle_name(const char* pattern, const char* file_name)
 */
 bool occurred_within(const time_t current_time, const time_t m_time, const int num_days)
 {
-    const long int num_secs_per_day = 86400;
-    long int max_dif = num_secs_per_day * num_days;
-    return (current_time - m_time) < max_dif;
+    
+    long int max_dif = NUM_SECS_PER_DAY * (num_days + 1);
+    long int min_dif = num_days * num_days;
+    time_t time_dif = current_time - m_time;
+    return time_dif < max_dif && time_dif > min_dif;
 }
 /*
     Returns true if the file specified by file_name was modified at
@@ -135,7 +138,7 @@ bool handle_mtime(const file_data_t file)
     //struct tm* time = localtime(&(file.statbuffer.st_mtime));
     //if (time != NULL)
     //{
-    printf("it is %s \n", ctime(&(file.statbuffer.st_mtime)));
+    ////printf("it is %s \n", ctime(&(file.statbuffer.st_mtime)));
     //printf("%s\n", file.path);
     //printf("%ld\n\n", file.statbuffer.st_mtime);
     
@@ -193,14 +196,17 @@ void handle_file(const file_data_t file)
 {
     //if(is_dir)
     //{
-    if(handle_name(pattern, file.file_name))
+    //printf("%s\n", file.file_name);
+    if(!handle_name(pattern, file.file_name))
     {
-        print_match(file.path);
-        if(handle_mtime(file))
-        {
-            printf("%s recent enough\n", file.path);
-        }
+        return;
     }
+    if(num_days != -1 && !handle_mtime(file))
+    {
+        return;
+        //printf("%s recent enough\n", file.path);
+    }
+    print_match(file.path);
     //handle_mtime(file);
     //}
 /*     else
@@ -274,10 +280,10 @@ void walk_dir(file_data_t dir_file_data)
             }
 
             // Check if the file is of type directory
-            if((statbuffer.st_mode & S_IFMT) == S_IFDIR)
+            if((cur_file.statbuffer.st_mode & S_IFMT) == S_IFDIR)
             {
                 //printf("%s\n", path);
-                strcat(path, "/");
+                strcat(cur_file.path, "/");
                 walk_dir(cur_file);
             }
             else
