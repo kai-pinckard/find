@@ -34,6 +34,9 @@ The file type and mode
 const int NUM_SECS_PER_DAY = 86400;
 char* pattern;
 int num_days = -1;
+// this is supposed to match any file
+mode_t desired_mode = S_IFMT;
+
 bool debug = true;
 
 // start using struct to store information.
@@ -158,10 +161,10 @@ bool handle_mtime(const file_data_t file)
     Returns true if the file specified by file_name is of the type
     passed for -type
 */
-bool handle_type()
+bool handle_type(const file_data_t file)
 {
     //printf("handling type\n");
-    return true;
+    return (file.statbuffer.st_mode & S_IFMT) == desired_mode;
 }
 
 /*
@@ -205,6 +208,10 @@ void handle_file(const file_data_t file)
     {
         return;
         //printf("%s recent enough\n", file.path);
+    }
+    if(desired_mode != S_IFMT && !handle_type(file))
+    {
+        return;
     }
     print_match(file.path);
     //handle_mtime(file);
@@ -327,6 +334,78 @@ char* get_opt_args(char** argv, int index)
 }
 
 /*
+   -type c
+              File is of type c:
+
+              b      block (buffered) special
+
+              c      character (unbuffered) special
+
+              d      directory
+
+              p      named pipe (FIFO)
+
+              f      regular file
+
+              l      symbolic link; this is never true if the -L option or the -follow  option  is
+                     in  effect,  unless  the  symbolic link is broken.  If you want to search for
+                     symbolic links when -L is in effect, use -xtype.
+
+              s      socket
+
+              D      door (Solaris)
+
+              To search for more than one type at once, you can supply the combined list  of  type
+              letters separated by a comma `,' (GNU extension).
+
+
+              update for multiple modes
+
+                         S_IFMT     0170000   bit mask for the file type bit field
+
+           S_IFSOCK   0140000   socket
+           S_IFLNK    0120000   symbolic link
+           S_IFREG    0100000   regular file
+           S_IFBLK    0060000   block device
+           S_IFDIR    0040000   directory
+           S_IFCHR    0020000   character device
+           S_IFIFO    0010000   FIFO
+*/
+
+/*
+    Takes a single mode char and returns the corresponding
+    mode bit mask.
+*/
+mode_t get_mode_mask(char mode_specifier)
+{
+    switch(mode_specifier)
+    {
+        case 'b': return S_IFBLK;
+        case 'c': return S_IFCHR;
+        case 'd': return S_IFDIR;
+        //case 'p': return 
+        case 'f': return S_IFREG;
+        case 'l': return S_IFLNK;
+        case 's': return S_IFSOCK;
+        //case 'D': return
+        default: perror("unexpected mode");
+        return S_IFMT;
+    }
+}
+
+
+mode_t arg_to_mode(char** argv, int index)
+{
+    char* mode_specifier = argv[index+1];
+    if(strlen(mode_specifier) != 1)
+    {
+        perror("invalid mode");
+    }
+    char mode = mode_specifier[0];
+    mode_t mode_mask = get_mode_mask(mode);
+}
+
+/*
     Returns the next argument fol
 */
 char* parse_args(int argc, char** argv)
@@ -359,7 +438,9 @@ char* parse_args(int argc, char** argv)
             }
             else if(strcmp(argv[i], "-type") == 0)
             {
-                handle_type();
+                //handle_type();
+                desired_mode = arg_to_mode(argv, i);
+                printf("desired mode: %d\n", desired_mode);
             }
             else if(strcmp(argv[i], "-exec") == 0)
             {
