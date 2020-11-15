@@ -169,6 +169,11 @@ bool handle_type(const file_data_t file)
 
 /*
     executes the specified command on all the file specified.
+    note that exec is also a filter with only files that return 0 passing
+    note also that by default files are not printed that have exec called on them.
+    however if print is also specified then all files that returned 0 from exec will also be printed.
+    additionally exec needs to expand {} with the current file in all of its args and all args are assumed
+    to be exec args until a arg ; is encountered. 
 */
 bool handle_exec()
 {
@@ -405,6 +410,13 @@ mode_t arg_to_mode(char** argv, int index)
     mode_t mode_mask = get_mode_mask(mode);
 }
 
+/*
+    Returns the args to the exec program.
+*/
+char** get_exec_args(char** argv, int index)
+{
+
+}
 /*
     Returns the next argument fol
 */
