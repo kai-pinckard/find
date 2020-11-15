@@ -7,6 +7,10 @@
 #include <stdbool.h>
 #include <fnmatch.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+#include <assert.h>
 /*
 The file type and mode
        The  stat.st_mode field (for statx(2), the statx.stx_mode field) contains the file type and
@@ -32,12 +36,15 @@ The file type and mode
 
 // Globals consider removing
 const int NUM_SECS_PER_DAY = 86400;
-char* pattern;
+char* pattern = NULL;
 int num_days = -1;
 // this is supposed to match any file
 mode_t desired_mode = S_IFMT;
-
+char** exec_args = NULL;
+int exec_argc = -1;
 bool debug = true;
+// maybe change
+char* path = "/usr/bin";
 
 // start using struct to store information.
 typedef struct 
@@ -60,7 +67,12 @@ deallocating returned char*.
 */
 char* remove_last_slash(const char* directory)
 {
-    return strndup(directory, strlen(directory) - 1);
+    int last_char_index = strlen(directory) - 1;
+    if(directory[last_char_index] == '/')
+    {
+        return strndup(directory, last_char_index);
+    }
+    return strdup(directory);
 }
 
 /*
@@ -74,11 +86,15 @@ char* dir_path_to_dir_name(const char* directory)
 
     // get pointer to last occurance of char
     char* start_pos = strrchr(dir_path_no_slash, '/');
-    //printf("debug %s\n", start_pos);
-    // copy str starting from the next char on.
-    char* dir_name = strdup(start_pos + 1);
-    free(dir_path_no_slash);
-    return dir_name;
+    if(start_pos != NULL)
+    {
+        //printf("debug %s\n", start_pos);
+        // copy str starting from the next char on.
+        char* dir_name = strdup(start_pos + 1);
+        free(dir_path_no_slash);
+        return dir_name;
+    }
+    return dir_path_no_slash;
 }
 
 /*
@@ -175,9 +191,29 @@ bool handle_type(const file_data_t file)
     additionally exec needs to expand {} with the current file in all of its args and all args are assumed
     to be exec args until a arg ; is encountered. 
 */
-bool handle_exec()
+bool handle_exec(file_data_t file)
 {
     //printf("handling exec\n");
+    int length = strlen(path) + strlen(exec_args[0]) + 2;
+    char* exec_path = (char*) calloc(length, sizeof(char));
+    strcat(strcat(strcat(exec_path, path), "/"), exec_args[0]);
+    if (access(exec_path, X_OK) == 0)
+    {
+        // A valid executable has been found
+        pid_t child;
+        child = fork();
+
+        if(child != 0)
+        {
+            // The parent returns immediately
+            while(wait(NULL) > 0);
+        }
+        else
+        {
+            execv(file.path, exec_args);
+        }
+    }
+    perror("invalid executable.");
     return true;
 }
 
@@ -205,7 +241,7 @@ void handle_file(const file_data_t file)
     //if(is_dir)
     //{
     //printf("%s\n", file.file_name);
-    if(!handle_name(pattern, file.file_name))
+    if(pattern != NULL && !handle_name(pattern, file.file_name))
     {
         return;
     }
@@ -215,6 +251,10 @@ void handle_file(const file_data_t file)
         //printf("%s recent enough\n", file.path);
     }
     if(desired_mode != S_IFMT && !handle_type(file))
+    {
+        return;
+    }
+    if(exec_args != NULL && !handle_exec(file))
     {
         return;
     }
@@ -411,11 +451,37 @@ mode_t arg_to_mode(char** argv, int index)
 }
 
 /*
-    Returns the args to the exec program.
-*/
-char** get_exec_args(char** argv, int index)
-{
+    Searches for the terminating ; and replaces it with NULL
+    then returns the pointer to the first exec arg.
 
+//////////////////////////////////////////
+    //need to expand {} this will require not storing things in argv
+*/
+void get_exec_args(char** argv, int argc, int index)
+{
+    int semicolon_index = -1; 
+    for(int i = index + 1; i < argc; i++)
+    {
+        printf("index %d argc %d\n", i, argc);
+        printf("%s\n", argv[i]);
+        // Check for the terminating ; 
+        if (argv[i][0] == ';' && argv[i][1] == '\0')
+        {
+            semicolon_index = i; 
+            break;
+        }
+    }
+    assert(semicolon_index > index);
+    exec_args = (char**) calloc( semicolon_index - index, sizeof(char*));
+    for(int i = index; i < semicolon_index; i++)
+    {
+        exec_args[i] = strdup(argv[i-index]);
+        printf("%s", exec_args[i]);
+    }
+    exec_argc = semicolon_index - index;
+    return;
+    //fix this
+    perror("find: missing argument to `-exec'");
 }
 /*
     Returns the next argument fol
@@ -456,7 +522,16 @@ char* parse_args(int argc, char** argv)
             }
             else if(strcmp(argv[i], "-exec") == 0)
             {
-                handle_exec();
+                // name of executable is a required argument.
+                get_exec_args(argv, argc, i);
+                int j = 0;
+                for(int j = 0; j < exec_argc; j++)
+                {
+                    printf("%s ", exec_args[j]);
+                }
+                printf("\n");
+                continue;
+                
             }
             else if(strcmp(argv[i], "-print") == 0)
             {
@@ -479,6 +554,9 @@ char* parse_args(int argc, char** argv)
 int main(int argc, char** argv)
 {
 
+    /* use realpath
+    througout for path resolution and link handling.
+    */
     parse_args(argc, argv);
     struct stat statbuffer;
     file_data_t base_dir = 
