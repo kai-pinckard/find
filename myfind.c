@@ -9,6 +9,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <fcntl.h>
 
 #include <assert.h>
 /*
@@ -44,7 +45,7 @@ char** exec_args = NULL;
 int exec_argc = -1;
 bool debug = true;
 // maybe change
-char* path = "/usr/bin";
+char* path = "/usr/bin /usr .";
 
 // start using struct to store information.
 typedef struct 
@@ -133,7 +134,121 @@ bool handle_name(const char* pattern, const char* file_name)
     return fnmatch(pattern, file_name, 0) == 0;
 }
 
+/*
+from wish
+*/
+void set_args_to_null(char** args, int start_index)
+{
+    for(int i = start_index; args[i] != NULL; i++)
+    {
+        args[i] = NULL;
+    }
+    return;
+}
 
+/*
+From wish
+change this to handle_Exec
+*/
+bool handle_external_command(file_data_t file)
+{
+    // Create a modifiable copy of path
+    int path_len = strlen(path) + 1;
+    char path_cp[path_len];
+    strncpy(path_cp, path, path_len);
+
+    char* directory = strtok(path_cp, " ");
+    bool found_file = false;
+
+    while(directory != NULL)
+    {
+        // Combine the directory with args[0]
+        printf("directory: %s exec_Arg[0] %s\n", directory, exec_args[0]);
+        int file_path_length = strlen(directory) + strlen(exec_args[0]) + 2;
+        char* file_path = (char*) calloc(file_path_length, sizeof(char));
+        strncpy(file_path, directory, file_path_length);
+        strcat(file_path, "/");
+        strcat(file_path, exec_args[0]);
+
+        if (access(file_path, X_OK) == 0)
+        {
+            printf("accessed %s\n", file_path);
+            // A valid executable has been found
+            found_file = true;
+            pid_t child;
+            child = fork();
+
+            if(child != 0)
+            {
+                // The parent returns childs return code
+                int wstatus = -1;
+                printf("waiting for child\n");
+                waitpid(child, &wstatus, 0);
+                printf("child returned with %d\n", wstatus);
+                return !(wstatus == 0);
+                
+            }
+            }
+            else
+            {
+                int redirection_file = -1;
+
+                // Loop through all arguments to see if any are ">"
+                for(int i = 0; exec_args[i] != NULL; i++)
+                {
+                    if(strcmp(exec_args[i], ">") == 0)
+                    {
+                        // Check that there is an argument after '>' and there is not more than one
+                        if(exec_args[i+1] != NULL && exec_args[i+2] == NULL)
+                        {
+                            redirection_file = open(exec_args[i+1], O_CREAT|O_TRUNC|O_WRONLY, 0666);
+                            if (redirection_file < 0)
+                            {
+                                // Failed to open redirection file
+                                perror("1 an error occured in handle_external");
+                                return 1;
+                            }
+                            // Remove all args after and including > in the current command
+                            set_args_to_null(exec_args, i);
+                        }
+                        else
+                        {
+                            perror("2 an error occured in handle_external");
+                            return 1;
+                        }
+                        // No need to continue loop after finding '>'
+                        break;
+                    }
+                }
+
+                // Configure output and error redirection
+
+                free(exec_args[0]);
+                exec_args[0] = file_path;
+                printf("file path: %s", exec_args[0]);
+
+                dup2(redirection_file, 1);
+                dup2(redirection_file, 2);
+
+                printf("starting child with args:\n");
+                for(int i =0; i < exec_argc; i++)
+                {
+                    printf("arg %d %s\n", i, exec_args[i]);
+                }
+                // Run the specified executable
+                execv(exec_args[0], exec_args);
+                perror("child returned with error");
+                exit(1);
+            }
+            directory = strtok(NULL, " ");
+        }
+        if(!found_file)
+        {
+            perror("4 an error occured in handle_external");
+        }
+        return 1;
+    }
+    
 
 /*
     Returns true if the modified time is within num_days of the
@@ -193,10 +308,11 @@ bool handle_type(const file_data_t file)
 */
 bool handle_exec(file_data_t file)
 {
-    //printf("handling exec\n");
+    /* //printf("handling exec\n");
     int length = strlen(path) + strlen(exec_args[0]) + 2;
     char* exec_path = (char*) calloc(length, sizeof(char));
-    strcat(strcat(strcat(exec_path, path), "/"), exec_args[0]);
+    strcat(strcat(exec_path, path), exec_args[0]);
+    printf("printing execpath %s\n", exec_path);
     if (access(exec_path, X_OK) == 0)
     {
         // A valid executable has been found
@@ -205,16 +321,20 @@ bool handle_exec(file_data_t file)
 
         if(child != 0)
         {
-            // The parent returns immediately
-            while(wait(NULL) > 0);
+            // The parent waits for child
+            int wstatus = -1;
+            while(waitpid(child, &wstatus, 0) > 0);
         }
         else
         {
             execv(file.path, exec_args);
         }
     }
-    perror("invalid executable.");
-    return true;
+    else
+    {
+        perror("invalid executable.");
+    } */
+    return system(exec_args) != 0;
 }
 
 /*
@@ -379,45 +499,6 @@ char* get_opt_args(char** argv, int index)
 }
 
 /*
-   -type c
-              File is of type c:
-
-              b      block (buffered) special
-
-              c      character (unbuffered) special
-
-              d      directory
-
-              p      named pipe (FIFO)
-
-              f      regular file
-
-              l      symbolic link; this is never true if the -L option or the -follow  option  is
-                     in  effect,  unless  the  symbolic link is broken.  If you want to search for
-                     symbolic links when -L is in effect, use -xtype.
-
-              s      socket
-
-              D      door (Solaris)
-
-              To search for more than one type at once, you can supply the combined list  of  type
-              letters separated by a comma `,' (GNU extension).
-
-
-              update for multiple modes
-
-                         S_IFMT     0170000   bit mask for the file type bit field
-
-           S_IFSOCK   0140000   socket
-           S_IFLNK    0120000   symbolic link
-           S_IFREG    0100000   regular file
-           S_IFBLK    0060000   block device
-           S_IFDIR    0040000   directory
-           S_IFCHR    0020000   character device
-           S_IFIFO    0010000   FIFO
-*/
-
-/*
     Takes a single mode char and returns the corresponding
     mode bit mask.
 */
@@ -473,12 +554,13 @@ void get_exec_args(char** argv, int argc, int index)
     }
     assert(semicolon_index > index);
     exec_args = (char**) calloc( semicolon_index - index, sizeof(char*));
-    for(int i = index; i < semicolon_index; i++)
+    for(int i = index + 1; i < semicolon_index; i++)
     {
-        exec_args[i] = strdup(argv[i-index]);
-        printf("%s", exec_args[i]);
+        printf("debug %d %s\n", i, argv[i]);
+        exec_args[i-index-1] = strdup(argv[i]);
+        //printf("%s", exec_args[i-index+1]);
     }
-    exec_argc = semicolon_index - index;
+    exec_argc = semicolon_index - index -1;
     return;
     //fix this
     perror("find: missing argument to `-exec'");
@@ -523,6 +605,7 @@ char* parse_args(int argc, char** argv)
             else if(strcmp(argv[i], "-exec") == 0)
             {
                 // name of executable is a required argument.
+                printf("parsing exec\n");
                 get_exec_args(argv, argc, i);
                 int j = 0;
                 for(int j = 0; j < exec_argc; j++)
@@ -557,11 +640,22 @@ int main(int argc, char** argv)
     /* use realpath
     througout for path resolution and link handling.
     */
-    parse_args(argc, argv);
+    //parse_args(argc, argv);
     struct stat statbuffer;
+    char* base_path;
+
+    if(!starts_with(argv[1], "-"))
+    {
+        base_path = argv[1];
+    }
+    else
+    {
+        base_path = ".";
+    }
+
     file_data_t base_dir = 
         {
-            argv[1],
+            base_path,
             dir_path_to_dir_name(argv[1]),
             statbuffer
         };
@@ -569,6 +663,8 @@ int main(int argc, char** argv)
     {
         perror("Unable to get stat info for input file");
     }
-    walk_dir(base_dir);
+    //handle_external_command(base_dir);
+    system("grep percent findman.txt > output.txt");
+    //walk_dir(base_dir);
     return 0;
 }
