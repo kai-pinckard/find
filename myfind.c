@@ -12,28 +12,6 @@
 #include <fcntl.h>
 
 #include <assert.h>
-/*
-The file type and mode
-       The  stat.st_mode field (for statx(2), the statx.stx_mode field) contains the file type and
-       mode.
-
-       POSIX refers to the stat.st_mode bits corresponding to the mask S_IFMT (see below)  as  the
-       file  type, the 12 bits corresponding to the mask 07777 as the file mode bits and the least
-       significant 9 bits (0777) as the file permission bits.
-
-       The following mask values are defined for the file type:
-
-           S_IFMT     0170000   bit mask for the file type bit field
-
-           S_IFSOCK   0140000   socket
-           S_IFLNK    0120000   symbolic link
-           S_IFREG    0100000   regular file
-           S_IFBLK    0060000   block device
-           S_IFDIR    0040000   directory
-           S_IFCHR    0020000   character device
-           S_IFIFO    0010000   FIFO
-*/
-
 
 // Globals consider removing
 const int NUM_SECS_PER_DAY = 86400;
@@ -41,11 +19,9 @@ char* pattern = NULL;
 int num_days = -1;
 // this is supposed to match any file
 mode_t desired_mode = S_IFMT;
-char** exec_args = NULL;
-int exec_argc = -1;
+char* exec_args = NULL;
 bool debug = true;
-// maybe change
-char* path = "/usr/bin /usr .";
+bool should_print = false;
 
 // start using struct to store information.
 typedef struct 
@@ -135,122 +111,6 @@ bool handle_name(const char* pattern, const char* file_name)
 }
 
 /*
-from wish
-*/
-void set_args_to_null(char** args, int start_index)
-{
-    for(int i = start_index; args[i] != NULL; i++)
-    {
-        args[i] = NULL;
-    }
-    return;
-}
-
-/*
-From wish
-change this to handle_Exec
-*/
-bool handle_external_command(file_data_t file)
-{
-    // Create a modifiable copy of path
-    int path_len = strlen(path) + 1;
-    char path_cp[path_len];
-    strncpy(path_cp, path, path_len);
-
-    char* directory = strtok(path_cp, " ");
-    bool found_file = false;
-
-    while(directory != NULL)
-    {
-        // Combine the directory with args[0]
-        printf("directory: %s exec_Arg[0] %s\n", directory, exec_args[0]);
-        int file_path_length = strlen(directory) + strlen(exec_args[0]) + 2;
-        char* file_path = (char*) calloc(file_path_length, sizeof(char));
-        strncpy(file_path, directory, file_path_length);
-        strcat(file_path, "/");
-        strcat(file_path, exec_args[0]);
-
-        if (access(file_path, X_OK) == 0)
-        {
-            printf("accessed %s\n", file_path);
-            // A valid executable has been found
-            found_file = true;
-            pid_t child;
-            child = fork();
-
-            if(child != 0)
-            {
-                // The parent returns childs return code
-                int wstatus = -1;
-                printf("waiting for child\n");
-                waitpid(child, &wstatus, 0);
-                printf("child returned with %d\n", wstatus);
-                return !(wstatus == 0);
-                
-            }
-            }
-            else
-            {
-                int redirection_file = -1;
-
-                // Loop through all arguments to see if any are ">"
-                for(int i = 0; exec_args[i] != NULL; i++)
-                {
-                    if(strcmp(exec_args[i], ">") == 0)
-                    {
-                        // Check that there is an argument after '>' and there is not more than one
-                        if(exec_args[i+1] != NULL && exec_args[i+2] == NULL)
-                        {
-                            redirection_file = open(exec_args[i+1], O_CREAT|O_TRUNC|O_WRONLY, 0666);
-                            if (redirection_file < 0)
-                            {
-                                // Failed to open redirection file
-                                perror("1 an error occured in handle_external");
-                                return 1;
-                            }
-                            // Remove all args after and including > in the current command
-                            set_args_to_null(exec_args, i);
-                        }
-                        else
-                        {
-                            perror("2 an error occured in handle_external");
-                            return 1;
-                        }
-                        // No need to continue loop after finding '>'
-                        break;
-                    }
-                }
-
-                // Configure output and error redirection
-
-                free(exec_args[0]);
-                exec_args[0] = file_path;
-                printf("file path: %s", exec_args[0]);
-
-                dup2(redirection_file, 1);
-                dup2(redirection_file, 2);
-
-                printf("starting child with args:\n");
-                for(int i =0; i < exec_argc; i++)
-                {
-                    printf("arg %d %s\n", i, exec_args[i]);
-                }
-                // Run the specified executable
-                execv(exec_args[0], exec_args);
-                perror("child returned with error");
-                exit(1);
-            }
-            directory = strtok(NULL, " ");
-        }
-        if(!found_file)
-        {
-            perror("4 an error occured in handle_external");
-        }
-        return 1;
-    }
-    
-
-/*
     Returns true if the modified time is within num_days of the
     current time.
 */
@@ -268,24 +128,9 @@ bool occurred_within(const time_t current_time, const time_t m_time, const int n
 */
 bool handle_mtime(const file_data_t file)
 {
-    //printf("handling mtime\n");
-    //struct tm* time = localtime(&(file.statbuffer.st_mtime));
-    //if (time != NULL)
-    //{
-    ////printf("it is %s \n", ctime(&(file.statbuffer.st_mtime)));
-    //printf("%s\n", file.path);
-    //printf("%ld\n\n", file.statbuffer.st_mtime);
-    
     time_t cur_time;
     time(&cur_time);
-    //current_time = localtime(&rawtime);
     return occurred_within(cur_time, file.statbuffer.st_mtime, num_days);
-    //}
-    //else
-    //{
-    //perror("unable to convert time.");
-    //}
-    //free(time);
 }
 
 /*
@@ -298,6 +143,53 @@ bool handle_type(const file_data_t file)
     return (file.statbuffer.st_mode & S_IFMT) == desired_mode;
 }
 
+
+
+/* 
+    fill the brackets in exec_args and return a new string caller must free
+*/
+char* populate_command(file_data_t file)
+{
+    // calculate allocation size of filled string
+    int path_length = strlen(file.path);
+    int length = strlen(exec_args) + 1;
+    int size_inc = path_length - strlen("{}");
+
+    // loop through all but the last char in the string
+    // to find occurances of {}
+    for(int i = 0; exec_args[i+1] != '\0'; i++)
+    {
+        if (exec_args[i] == '{' && exec_args[i+1] == '}')
+        {
+            length += size_inc;
+        }
+    }
+
+    char* filled_exec_args = (char*) calloc(length, sizeof(char));
+
+    int filled_str_index = 0;
+    for (int original_index = 0; original_index < strlen(exec_args);)
+    {
+        if (exec_args[original_index] == '{' && exec_args[original_index+1] == '}')
+        {
+            for(int j = 0; j < path_length; j++)
+            {
+                filled_exec_args[filled_str_index + j] = file.path[j];
+            }
+            filled_str_index += path_length;
+            original_index += 2;
+        }
+        else
+        {
+            filled_exec_args[filled_str_index] = exec_args[original_index];
+            filled_str_index += 1;
+            original_index += 1;
+        }
+    }
+    //printf("demo fill %s\n", filled_exec_args);
+    return filled_exec_args;
+}
+
 /*
     executes the specified command on all the file specified.
     note that exec is also a filter with only files that return 0 passing
@@ -308,33 +200,8 @@ bool handle_type(const file_data_t file)
 */
 bool handle_exec(file_data_t file)
 {
-    /* //printf("handling exec\n");
-    int length = strlen(path) + strlen(exec_args[0]) + 2;
-    char* exec_path = (char*) calloc(length, sizeof(char));
-    strcat(strcat(exec_path, path), exec_args[0]);
-    printf("printing execpath %s\n", exec_path);
-    if (access(exec_path, X_OK) == 0)
-    {
-        // A valid executable has been found
-        pid_t child;
-        child = fork();
-
-        if(child != 0)
-        {
-            // The parent waits for child
-            int wstatus = -1;
-            while(waitpid(child, &wstatus, 0) > 0);
-        }
-        else
-        {
-            execv(file.path, exec_args);
-        }
-    }
-    else
-    {
-        perror("invalid executable.");
-    } */
-    return system(exec_args) != 0;
+    char* filled_exec_args = populate_command(file);
+    return system(filled_exec_args) == 0;
 }
 
 /*
@@ -378,29 +245,10 @@ void handle_file(const file_data_t file)
     {
         return;
     }
-    print_match(file.path);
-    //handle_mtime(file);
-    //}
-/*     else
+    if(exec_args == NULL || should_print)
     {
-        //printf("handling file %s\n", file_name);
-        if(!handle_name(pattern, file_name))
-        {
-        }
-        /*
-        if(!handle_type(pattern, file_name))
-        {
-            return false;
-        }
-        if(!handle_mtime(pattern, file_name))
-        {
-            return false;
-        }
-        else
-        {
-            printf("%s\n", file_name);
-        }
-    } */
+        print_match(file.path);
+    }
 }
 
 /*
@@ -446,6 +294,7 @@ void walk_dir(file_data_t dir_file_data)
 
             // check if de->d_type is available for performance
             // fall back on calling stat.
+            //printf("%s\n", path);
             if(stat(path, &cur_file.statbuffer) == -1)
             {
                 perror("Unable to get stat info for input file");
@@ -540,7 +389,11 @@ mode_t arg_to_mode(char** argv, int index)
 */
 void get_exec_args(char** argv, int argc, int index)
 {
+
     int semicolon_index = -1; 
+
+    // start at one so we dont have to add space for terminating char later.
+    int exec_args_len = 1;
     for(int i = index + 1; i < argc; i++)
     {
         printf("index %d argc %d\n", i, argc);
@@ -551,16 +404,19 @@ void get_exec_args(char** argv, int argc, int index)
             semicolon_index = i; 
             break;
         }
+        else
+        {
+            exec_args_len += strlen(argv[i]) + 1;
+        }
     }
     assert(semicolon_index > index);
-    exec_args = (char**) calloc( semicolon_index - index, sizeof(char*));
+    exec_args = (char*) calloc(exec_args_len, sizeof(char));
     for(int i = index + 1; i < semicolon_index; i++)
     {
         printf("debug %d %s\n", i, argv[i]);
-        exec_args[i-index-1] = strdup(argv[i]);
-        //printf("%s", exec_args[i-index+1]);
+        strcat(strcat(exec_args, argv[i]), " ");
     }
-    exec_argc = semicolon_index - index -1;
+
     return;
     //fix this
     perror("find: missing argument to `-exec'");
@@ -607,18 +463,14 @@ char* parse_args(int argc, char** argv)
                 // name of executable is a required argument.
                 printf("parsing exec\n");
                 get_exec_args(argv, argc, i);
-                int j = 0;
-                for(int j = 0; j < exec_argc; j++)
-                {
-                    printf("%s ", exec_args[j]);
-                }
+                printf("%s ", exec_args);
                 printf("\n");
                 continue;
                 
             }
             else if(strcmp(argv[i], "-print") == 0)
             {
-                handle_print();   
+                should_print = true;  
             }
             else if(strcmp(argv[i], "-L") == 0)
             {
@@ -640,7 +492,7 @@ int main(int argc, char** argv)
     /* use realpath
     througout for path resolution and link handling.
     */
-    //parse_args(argc, argv);
+    parse_args(argc, argv);
     struct stat statbuffer;
     char* base_path;
 
@@ -650,7 +502,7 @@ int main(int argc, char** argv)
     }
     else
     {
-        base_path = ".";
+        base_path = "./";
     }
 
     file_data_t base_dir = 
@@ -663,8 +515,7 @@ int main(int argc, char** argv)
     {
         perror("Unable to get stat info for input file");
     }
-    //handle_external_command(base_dir);
-    system("grep percent findman.txt > output.txt");
-    //walk_dir(base_dir);
+    //system("grep percent findman.txt > output.txt");
+    walk_dir(base_dir);
     return 0;
 }
