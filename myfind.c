@@ -22,6 +22,7 @@ mode_t desired_mode = S_IFMT;
 char* exec_args = NULL;
 bool debug = true;
 bool should_print = false;
+bool follow_symbolic = false;
 
 // start using struct to store information.
 typedef struct 
@@ -37,6 +38,7 @@ typedef struct
 
 } file_data_t;
 
+file_data_t base_dir;
 /*
 Returns a new char* containing the directory with the last / removed
 For example ../exampledir/ becomes ../exampledir. Caller is responsible for 
@@ -168,7 +170,7 @@ char* populate_command(file_data_t file)
     char* filled_exec_args = (char*) calloc(length, sizeof(char));
 
     int filled_str_index = 0;
-    for (int original_index = 0; original_index < strlen(exec_args);)
+    for (unsigned long int original_index = 0; original_index < strlen(exec_args);)
     {
         if (exec_args[original_index] == '{' && exec_args[original_index+1] == '}')
         {
@@ -251,6 +253,18 @@ void handle_file(const file_data_t file)
     }
 }
 
+
+/*
+    returns a new string that the caller must deallocate that contains the trailing
+    slash.
+*/
+char* add_slash(const char* directory)
+{
+    int length = strlen(directory) + 2;
+    char* dir = (char*) calloc(length, sizeof(char));
+    return strcat(strcat(dir, directory), "/");
+}
+
 /*
     Returns a new char* containing the directory and the file name
     joined into a valid file path. Caller is responsible for deallocating
@@ -260,9 +274,24 @@ char* join_path(const char* directory, const char* file_name)
 {
     // one extra space in case we need to add a / later
     // Dangersous change later
-    int total_length = strlen(directory) + strlen(file_name) + 2;
+    int dir_len = strlen(directory);
+    int total_length = dir_len + strlen(file_name) + 1;
+    bool needs_slash = directory[dir_len-1] != '/';
+
+    if (needs_slash)
+    {
+        total_length++;
+    }
+
     char* path = (char*) calloc(total_length, sizeof(char));
-    return strcat(strcat(path, directory), file_name);
+    strcat(path, directory);
+
+    if(needs_slash)
+    {
+        strcat(path, "/");
+    }
+
+    return strcat(path, file_name);
 }
 
 /*
@@ -289,23 +318,50 @@ void walk_dir(file_data_t dir_file_data)
         {
             char* file_name = strdup(de->d_name);
             char* path = join_path(dir_file_data.path, de->d_name);
+
+            /* if (follow_symbolic)
+            {
+                //printf("not resolved: %s\n", path);
+                char* resolved_path = realpath(path, NULL);
+                // need to fix missing / in inputs.
+                free(path);
+                path = resolved_path;
+                //printf("resolved: %s\n", path);
+            } */
+
             struct stat statbuffer;
+            if(follow_symbolic)
+            {
+                if(stat(path, &statbuffer) == -1)
+                {
+                    perror("Unable to get stat info for input file");
+                }
+            }
+            else
+            {
+                if(lstat(path, &statbuffer) == -1)
+                {
+                    perror("Unable to get stat info for input file");
+                }
+            }
             file_data_t cur_file = {path, file_name, statbuffer};
 
             // check if de->d_type is available for performance
             // fall back on calling stat.
             //printf("%s\n", path);
-            if(stat(path, &cur_file.statbuffer) == -1)
-            {
-                perror("Unable to get stat info for input file");
-            }
 
             // Check if the file is of type directory
             if((cur_file.statbuffer.st_mode & S_IFMT) == S_IFDIR)
             {
-                //printf("%s\n", path);
-                strcat(cur_file.path, "/");
-                walk_dir(cur_file);
+                if((cur_file.statbuffer.st_mode & S_IFMT) != S_IFLNK || follow_symbolic)
+                {
+                    //printf("%s\n", path);
+                    char* new_path = add_slash(cur_file.path);
+                    free(cur_file.path);
+                    cur_file.path = new_path;
+                    walk_dir(cur_file);
+                }
+
             }
             else
             {
@@ -314,7 +370,7 @@ void walk_dir(file_data_t dir_file_data)
                 //printf("walking %s\n", path);
             }
             free(file_name);
-            free(path);
+            //free(path);
         }
     }
     closedir(dr);
@@ -327,7 +383,7 @@ void walk_dir(file_data_t dir_file_data)
 */
 bool starts_with(const char* str, const char* pattern)
 {
-    for(int i = 0; i < strlen(pattern); i++)
+    for(unsigned long int i = 0; i < strlen(pattern); i++)
     {
         if(str[i] != pattern[i])
         {
@@ -378,6 +434,7 @@ mode_t arg_to_mode(char** argv, int index)
     }
     char mode = mode_specifier[0];
     mode_t mode_mask = get_mode_mask(mode);
+    return mode_mask;
 }
 
 /*
@@ -424,7 +481,7 @@ void get_exec_args(char** argv, int argc, int index)
 /*
     Returns the next argument fol
 */
-char* parse_args(int argc, char** argv)
+void parse_args(int argc, char** argv)
 {
     printf("------------------start parse--------------------\n");
     bool more_start_dirs = true;
@@ -432,8 +489,12 @@ char* parse_args(int argc, char** argv)
     {
         printf("%s\n",argv[i]);
 
+        if(strcmp(argv[i], "-L") == 0)
+        {
+            follow_symbolic = true;
+        }
         // Check if it is an option flag
-        if(starts_with(argv[i], "-"))
+        else if(starts_with(argv[i], "-"))
         {
             more_start_dirs = false;
             printf("option %s\n", argv[i]);
@@ -441,10 +502,6 @@ char* parse_args(int argc, char** argv)
             if(strcmp(argv[i], "-name") == 0)
             {
                 pattern = get_opt_args(argv, i);
-                /* if (handle_name())
-                {
-                    printf("%s matched pattern: \n")
-                } */
             }
             else if(strcmp(argv[i], "-mtime") == 0)
             {
@@ -472,16 +529,52 @@ char* parse_args(int argc, char** argv)
             {
                 should_print = true;  
             }
-            else if(strcmp(argv[i], "-L") == 0)
+        }
+        else if(more_start_dirs)
+        {
+            printf("arg: %s\n", argv[i]);
+            printf("should be extracting more startdirs here\n");
+            struct stat statbuffer;
+            char* base_path;
+
+            // need to fix problem with -L coming before the files.
+            base_path = strdup(argv[i]);
+
+            //base_path = strdup("./");
+            if(follow_symbolic)
             {
-                handle_L();
+                if(stat(base_path, &statbuffer) == -1)
+                {
+                    perror("Unable to get stat info for input file");
+                }
             }
+            else
+            {
+                if(lstat(base_path, &statbuffer) == -1)
+                {
+                    perror("Unable to get stat info for input file");
+                }
+            }
+        /*     if (follow_symbolic)
+            {
+            // printf("not resolved %s\n", base_path);
+                printf("unresolved %s\n", base_path);
+                base_path = realpath(base_path, NULL);
+                printf("base: %s\n", base_path);
+                //printf("resolved %s\n", base_path);
+            } */
+
+            base_dir.path =  base_path;
+            base_dir.file_name = dir_path_to_dir_name(base_path);
+            base_dir.statbuffer = statbuffer;
         }
         else
         {
-            printf("parsing %s\n",argv[i]);
+            printf("probably should not be here %s\n",argv[i]);
         }
     }
+
+
     printf("----------------end parse--------------------\n");
 }
 
@@ -493,29 +586,9 @@ int main(int argc, char** argv)
     througout for path resolution and link handling.
     */
     parse_args(argc, argv);
-    struct stat statbuffer;
-    char* base_path;
-
-    if(!starts_with(argv[1], "-"))
-    {
-        base_path = argv[1];
-    }
-    else
-    {
-        base_path = "./";
-    }
-
-    file_data_t base_dir = 
-        {
-            base_path,
-            dir_path_to_dir_name(argv[1]),
-            statbuffer
-        };
-    if(stat(base_dir.path, &base_dir.statbuffer) == -1)
-    {
-        perror("Unable to get stat info for input file");
-    }
+    printf("---------------Calling walkdir--------------\n");
     //system("grep percent findman.txt > output.txt");
+    printf("calling %s, %s\n", base_dir.path, base_dir.file_name);
     walk_dir(base_dir);
     return 0;
 }
