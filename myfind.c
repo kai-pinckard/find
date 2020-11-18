@@ -38,7 +38,8 @@ typedef struct
 
 } file_data_t;
 
-file_data_t base_dir;
+int num_base_dirs = 0;
+file_data_t* base_dirs = NULL;
 /*
 Returns a new char* containing the directory with the last / removed
 For example ../exampledir/ becomes ../exampledir. Caller is responsible for 
@@ -536,6 +537,7 @@ void parse_args(int argc, char** argv)
             printf("should be extracting more startdirs here\n");
             struct stat statbuffer;
             char* base_path;
+            int base_dirs_index = num_base_dirs;
 
             // need to fix problem with -L coming before the files.
             base_path = strdup(argv[i]);
@@ -564,9 +566,10 @@ void parse_args(int argc, char** argv)
                 //printf("resolved %s\n", base_path);
             } */
 
-            base_dir.path =  base_path;
-            base_dir.file_name = dir_path_to_dir_name(base_path);
-            base_dir.statbuffer = statbuffer;
+            base_dirs[base_dirs_index].path =  base_path;
+            base_dirs[base_dirs_index].file_name = dir_path_to_dir_name(base_path);
+            base_dirs[base_dirs_index].statbuffer = statbuffer;
+            num_base_dirs += 1;
         }
         else
         {
@@ -585,10 +588,16 @@ int main(int argc, char** argv)
     /* use realpath
     througout for path resolution and link handling.
     */
+
+    // overestimate the number of start dirs so that reallocation will not be
+    // necessary.
+    base_dirs = (file_data_t*) calloc(argc, sizeof(file_data_t));
     parse_args(argc, argv);
     printf("---------------Calling walkdir--------------\n");
     //system("grep percent findman.txt > output.txt");
-    printf("calling %s, %s\n", base_dir.path, base_dir.file_name);
-    walk_dir(base_dir);
+    for (int i = 0; i < num_base_dirs; i++)
+    {
+        walk_dir(base_dirs[i]);
+    }
     return 0;
 }
