@@ -533,8 +533,6 @@ void parse_args(int argc, char** argv)
         }
         else if(more_start_dirs)
         {
-            printf("arg: %s\n", argv[i]);
-            printf("should be extracting more startdirs here\n");
             struct stat statbuffer;
             char* base_path;
             int base_dirs_index = num_base_dirs;
@@ -557,14 +555,6 @@ void parse_args(int argc, char** argv)
                     perror("Unable to get stat info for input file");
                 }
             }
-        /*     if (follow_symbolic)
-            {
-            // printf("not resolved %s\n", base_path);
-                printf("unresolved %s\n", base_path);
-                base_path = realpath(base_path, NULL);
-                printf("base: %s\n", base_path);
-                //printf("resolved %s\n", base_path);
-            } */
 
             base_dirs[base_dirs_index].path =  base_path;
             base_dirs[base_dirs_index].file_name = dir_path_to_dir_name(base_path);
@@ -576,7 +566,36 @@ void parse_args(int argc, char** argv)
             printf("probably should not be here %s\n",argv[i]);
         }
     }
+    if(num_base_dirs == 0)
+    {
+        struct stat statbuffer;
+        char* base_path;
+        int base_dirs_index = num_base_dirs;
 
+        // need to fix problem with -L coming before the files.
+        base_path = strdup("./");
+
+        //base_path = strdup("./");
+        if(follow_symbolic)
+        {
+            if(stat(base_path, &statbuffer) == -1)
+            {
+                perror("Unable to get stat info for input file");
+            }
+        }
+        else
+        {
+            if(lstat(base_path, &statbuffer) == -1)
+            {
+                perror("Unable to get stat info for input file");
+            }
+        }
+
+        base_dirs[base_dirs_index].path =  base_path;
+        base_dirs[base_dirs_index].file_name = dir_path_to_dir_name(base_path);
+        base_dirs[base_dirs_index].statbuffer = statbuffer;
+        num_base_dirs += 1;
+    }
 
     printf("----------------end parse--------------------\n");
 }
