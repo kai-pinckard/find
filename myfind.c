@@ -16,15 +16,17 @@
 // Globals consider removing
 const int NUM_SECS_PER_DAY = 86400;
 char* pattern = NULL;
+
 int num_days = -1;
-// this is supposed to match any file
+// By default any file should be matched.
 mode_t desired_mode = S_IFMT;
+// This stores the arguments to exec
 char* exec_args = NULL;
-bool debug = true;
+// By default assume the user has not specified -print
 bool should_print = false;
+// By default do not follow symbolic links
 bool follow_symbolic = false;
 
-// start using struct to store information.
 typedef struct 
 {
     // for example ../testdir/file.txt
@@ -40,6 +42,7 @@ typedef struct
 
 int num_base_dirs = 0;
 file_data_t* base_dirs = NULL;
+
 /*
 Returns a new char* containing the directory with the last / removed
 For example ../exampledir/ becomes ../exampledir. Caller is responsible for 
@@ -216,21 +219,12 @@ bool handle_print()
     return true;
 }
 
-bool handle_L()
-{
-    //printf("handling L\n");
-    return true;
-}
-
 /*
     returns true if a file meets the requirements.
     returns false otherwise.
 */
 void handle_file(const file_data_t file)
 {
-    //if(is_dir)
-    //{
-    //printf("%s\n", file.file_name);
     if(pattern != NULL && !handle_name(pattern, file.file_name))
     {
         return;
@@ -238,7 +232,6 @@ void handle_file(const file_data_t file)
     if(num_days != -1 && !handle_mtime(file))
     {
         return;
-        //printf("%s recent enough\n", file.path);
     }
     if(desired_mode != S_IFMT && !handle_type(file))
     {
@@ -253,7 +246,6 @@ void handle_file(const file_data_t file)
         print_match(file.path);
     }
 }
-
 
 /*
     returns a new string that the caller must deallocate that contains the trailing
@@ -273,8 +265,6 @@ char* add_slash(const char* directory)
 */
 char* join_path(const char* directory, const char* file_name)
 {
-    // one extra space in case we need to add a / later
-    // Dangersous change later
     int dir_len = strlen(directory);
     int total_length = dir_len + strlen(file_name) + 1;
     bool needs_slash = directory[dir_len-1] != '/';
@@ -293,6 +283,27 @@ char* join_path(const char* directory, const char* file_name)
     }
 
     return strcat(path, file_name);
+}
+
+/*
+    Works like stat or lstat depending on value of follow_symbolic
+*/
+void get_stat_info(const char* path,  struct stat* statbuffer)
+{
+    if(follow_symbolic)
+    {
+        if(stat(path, statbuffer) == -1)
+        {
+            printf("Unable to get stat info for input file: No such file or directory\n"); 
+        }
+    }
+    else
+    {
+        if(lstat(path, statbuffer) == -1)
+        {
+            printf("Unable to get stat info for input file: No such file or directory\n"); 
+        }
+    }
 }
 
 /*
@@ -320,36 +331,9 @@ void walk_dir(file_data_t dir_file_data)
             char* file_name = strdup(de->d_name);
             char* path = join_path(dir_file_data.path, de->d_name);
 
-            /* if (follow_symbolic)
-            {
-                //printf("not resolved: %s\n", path);
-                char* resolved_path = realpath(path, NULL);
-                // need to fix missing / in inputs.
-                free(path);
-                path = resolved_path;
-                //printf("resolved: %s\n", path);
-            } */
-
             struct stat statbuffer;
-            if(follow_symbolic)
-            {
-                if(stat(path, &statbuffer) == -1)
-                {
-                    perror("Unable to get stat info for input file");
-                }
-            }
-            else
-            {
-                if(lstat(path, &statbuffer) == -1)
-                {
-                    perror("Unable to get stat info for input file");
-                }
-            }
+            get_stat_info(path, &statbuffer);
             file_data_t cur_file = {path, file_name, statbuffer};
-
-            // check if de->d_type is available for performance
-            // fall back on calling stat.
-            //printf("%s\n", path);
 
             // Check if the file is of type directory
             if((cur_file.statbuffer.st_mode & S_IFMT) == S_IFDIR)
@@ -362,50 +346,20 @@ void walk_dir(file_data_t dir_file_data)
                     cur_file.path = new_path;
                     walk_dir(cur_file);
                 }
-
             }
             else
             {
-                // None directories are handled here
+                // No directories are handled here
                 handle_file(cur_file);
                 free(cur_file.path);
                 free(cur_file.file_name);
-                //printf("walking %s\n", path);
             }
-            //free(path);
         }
     }
     free(dir_file_data.path);
     free(dir_file_data.file_name);
     free(de);
     closedir(dr);
-}
-
-
-/*
-    Returns true if the str starts with the pattern
-    false otherwise.
-*/
-bool starts_with(const char* str, const char* pattern)
-{
-    for(unsigned long int i = 0; i < strlen(pattern); i++)
-    {
-        if(str[i] != pattern[i])
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-/*
-    Gets the arguments for a particular option.
-    Index the index into argv of the current option.
-    may need to be updated if there are multiple args for an option.
-*/
-char* get_opt_args(char** argv, int index)
-{
-    return argv[index + 1];
 }
 
 /*
@@ -458,9 +412,6 @@ void get_exec_args(char** argv, int argc, int index)
     int exec_args_len = 1;
     for(int i = index + 1; i < argc; i++)
     {
-        printf("index %d argc %d\n", i, argc);
-        printf("%s\n", argv[i]);
-        // Check for the terminating ; 
         if (argv[i][0] == ';' && argv[i][1] == '\0')
         {
             semicolon_index = i; 
@@ -475,7 +426,7 @@ void get_exec_args(char** argv, int argc, int index)
     exec_args = (char*) calloc(exec_args_len, sizeof(char));
     for(int i = index + 1; i < semicolon_index; i++)
     {
-        printf("debug %d %s\n", i, argv[i]);
+        //printf("debug %d %s\n", i, argv[i]);
         strcat(strcat(exec_args, argv[i]), " ");
     }
 
@@ -483,50 +434,60 @@ void get_exec_args(char** argv, int argc, int index)
     //fix this
     perror("find: missing argument to `-exec'");
 }
+
+/*
+    adds another base dir to the global base_dirs char**
+*/
+void base_path_to_file_data(char* base_path)
+{
+    struct stat statbuffer;
+    get_stat_info(base_path, &statbuffer);
+    base_dirs[num_base_dirs].path = base_path;
+    base_dirs[num_base_dirs].file_name = dir_path_to_dir_name(base_path);
+    base_dirs[num_base_dirs].statbuffer = statbuffer;
+    num_base_dirs += 1;
+}
+
 /*
     Returns the next argument fol
 */
 void parse_args(int argc, char** argv)
 {
-    printf("------------------start parse--------------------\n");
+    //printf("------------------start parse--------------------\n");
     bool more_start_dirs = true;
     for(int i = 1; i < argc; i++)
     {
-        printf("%s\n",argv[i]);
+        //printf("%s\n",argv[i]);
 
         if(strcmp(argv[i], "-L") == 0)
         {
             follow_symbolic = true;
         }
         // Check if it is an option flag
-        else if(starts_with(argv[i], "-"))
+        else if(argv[i][0] == '-')
         {
             more_start_dirs = false;
-            printf("option %s\n", argv[i]);
+            //printf("option %s\n", argv[i]);
 
             if(strcmp(argv[i], "-name") == 0)
             {
-                pattern = get_opt_args(argv, i);
+                pattern = argv[i+1];
             }
             else if(strcmp(argv[i], "-mtime") == 0)
             {
                 //handle_mtime();
                 num_days = atoi(argv[i+1]);
-                printf("num days: %d\n", num_days);
+                //printf("num days: %d\n", num_days);
             }
             else if(strcmp(argv[i], "-type") == 0)
             {
                 //handle_type();
                 desired_mode = arg_to_mode(argv, i);
-                printf("desired mode: %d\n", desired_mode);
+                //printf("desired mode: %d\n", desired_mode);
             }
             else if(strcmp(argv[i], "-exec") == 0)
             {
-                // name of executable is a required argument.
-                printf("parsing exec\n");
                 get_exec_args(argv, argc, i);
-                printf("%s ", exec_args);
-                printf("\n");
                 continue;
                 
             }
@@ -537,79 +498,26 @@ void parse_args(int argc, char** argv)
         }
         else if(more_start_dirs)
         {
-            struct stat statbuffer;
-            char* base_path;
-            int base_dirs_index = num_base_dirs;
-
-            // need to fix problem with -L coming before the files.
-            base_path = strdup(argv[i]);
-
-            //base_path = strdup("./");
-            if(follow_symbolic)
-            {
-                if(stat(base_path, &statbuffer) == -1)
-                {
-                    perror("Unable to get stat info for input file");
-                }
-            }
-            else
-            {
-                if(lstat(base_path, &statbuffer) == -1)
-                {
-                    perror("Unable to get stat info for input file");
-                }
-            }
-
-            base_dirs[base_dirs_index].path =  base_path;
-            base_dirs[base_dirs_index].file_name = dir_path_to_dir_name(base_path);
-            base_dirs[base_dirs_index].statbuffer = statbuffer;
-            num_base_dirs += 1;
+            base_path_to_file_data(strdup(argv[i]));
         }
         else
         {
-            printf("probably should not be here %s\n",argv[i]);
+            //printf("probably should not be here %s\n",argv[i]);
         }
     }
     if(num_base_dirs == 0)
     {
-        struct stat statbuffer;
-        char* base_path;
-        int base_dirs_index = num_base_dirs;
-
-        // need to fix problem with -L coming before the files.
-        base_path = strdup("./");
-
-        //base_path = strdup("./");
-        if(follow_symbolic)
-        {
-            if(stat(base_path, &statbuffer) == -1)
-            {
-                perror("Unable to get stat info for input file");
-            }
-        }
-        else
-        {
-            if(lstat(base_path, &statbuffer) == -1)
-            {
-                perror("Unable to get stat info for input file");
-            }
-        }
-
-        base_dirs[base_dirs_index].path =  base_path;
-        base_dirs[base_dirs_index].file_name = dir_path_to_dir_name(base_path);
-        base_dirs[base_dirs_index].statbuffer = statbuffer;
-        num_base_dirs += 1;
+        base_path_to_file_data(strdup("./"));
     }
 
-    printf("----------------end parse--------------------\n");
+    //printf("----------------end parse--------------------\n");
 }
-
 
 int main(int argc, char** argv)
 {
     base_dirs = (file_data_t*) calloc(argc, sizeof(file_data_t));
     parse_args(argc, argv);
-    printf("---------------Calling walkdir--------------\n");
+    //printf("---------------Calling walkdir--------------\n");
     //system("grep percent findman.txt > output.txt");
     for (int i = 0; i < num_base_dirs; i++)
     {
