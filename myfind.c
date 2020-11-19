@@ -32,7 +32,7 @@ typedef struct
     char* path;
     // for example file.txt
     // subsubdir
-    const char* file_name;
+    char* file_name;
     // stores the information from calling stat
     struct stat statbuffer;
 
@@ -368,12 +368,16 @@ void walk_dir(file_data_t dir_file_data)
             {
                 // None directories are handled here
                 handle_file(cur_file);
+                free(cur_file.path);
+                free(cur_file.file_name);
                 //printf("walking %s\n", path);
             }
-            free(file_name);
             //free(path);
         }
     }
+    free(dir_file_data.path);
+    free(dir_file_data.file_name);
+    free(de);
     closedir(dr);
 }
 
@@ -603,13 +607,6 @@ void parse_args(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
-
-    /* use realpath
-    througout for path resolution and link handling.
-    */
-
-    // overestimate the number of start dirs so that reallocation will not be
-    // necessary.
     base_dirs = (file_data_t*) calloc(argc, sizeof(file_data_t));
     parse_args(argc, argv);
     printf("---------------Calling walkdir--------------\n");
@@ -618,5 +615,7 @@ int main(int argc, char** argv)
     {
         walk_dir(base_dirs[i]);
     }
+    free(base_dirs);
+
     return 0;
 }
