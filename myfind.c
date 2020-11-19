@@ -11,8 +11,6 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 
-#include <assert.h>
-
 // Globals consider removing
 const int NUM_SECS_PER_DAY = 86400;
 char* pattern = NULL;
@@ -59,9 +57,7 @@ char* remove_last_slash(const char* directory)
 }
 
 /*
-
     For example ../dir/exampledir/ becomes exampledir
-
 */
 char* dir_path_to_dir_name(const char* directory)
 {
@@ -71,7 +67,6 @@ char* dir_path_to_dir_name(const char* directory)
     char* start_pos = strrchr(dir_path_no_slash, '/');
     if(start_pos != NULL)
     {
-        //printf("debug %s\n", start_pos);
         // copy str starting from the next char on.
         char* dir_name = strdup(start_pos + 1);
         free(dir_path_no_slash);
@@ -95,15 +90,9 @@ void print_match(const char* path)
 
     for (int i = 0; i < length; i++)
     {
-        if(putchar(path[i]) == EOF)
-        {
-            perror("Can't write to stdout");
-        }  
+        putchar(path[i]);
     }
-    if(putchar('\n') == EOF)
-    {
-        perror("Can't write to stdout");
-    }  
+    putchar('\n');
 }
 
 /*
@@ -149,8 +138,6 @@ bool handle_type(const file_data_t file)
     return (file.statbuffer.st_mode & S_IFMT) == desired_mode;
 }
 
-
-
 /* 
     fill the brackets in exec_args and return a new string caller must free
 */
@@ -192,17 +179,11 @@ char* populate_command(file_data_t file)
             original_index += 1;
         }
     }
-    //printf("demo fill %s\n", filled_exec_args);
     return filled_exec_args;
 }
 
 /*
     executes the specified command on all the file specified.
-    note that exec is also a filter with only files that return 0 passing
-    note also that by default files are not printed that have exec called on them.
-    however if print is also specified then all files that returned 0 from exec will also be printed.
-    additionally exec needs to expand {} with the current file in all of its args and all args are assumed
-    to be exec args until a arg ; is encountered. 
 */
 bool handle_exec(file_data_t file)
 {
@@ -382,8 +363,7 @@ mode_t get_mode_mask(char mode_specifier)
         return S_IFMT;
     }
 }
-
-
+//update for multiple chars
 mode_t arg_to_mode(char** argv, int index)
 {
     char* mode_specifier = argv[index+1];
@@ -397,11 +377,7 @@ mode_t arg_to_mode(char** argv, int index)
 }
 
 /*
-    Searches for the terminating ; and replaces it with NULL
-    then returns the pointer to the first exec arg.
-
-//////////////////////////////////////////
-    //need to expand {} this will require not storing things in argv
+    UPdate comment
 */
 void get_exec_args(char** argv, int argc, int index)
 {
@@ -419,10 +395,10 @@ void get_exec_args(char** argv, int argc, int index)
         }
         else
         {
+            // add space for the argument and a space
             exec_args_len += strlen(argv[i]) + 1;
         }
     }
-    assert(semicolon_index > index);
     exec_args = (char*) calloc(exec_args_len, sizeof(char));
     for(int i = index + 1; i < semicolon_index; i++)
     {
@@ -457,13 +433,12 @@ void parse_args(int argc, char** argv)
     bool more_start_dirs = true;
     for(int i = 1; i < argc; i++)
     {
-        //printf("%s\n",argv[i]);
-
+        // Check for -L first since we don't want to interpret it as a regular option.
         if(strcmp(argv[i], "-L") == 0)
         {
             follow_symbolic = true;
         }
-        // Check if it is an option flag
+        // Check the current arg is an option
         else if(argv[i][0] == '-')
         {
             more_start_dirs = false;
@@ -517,8 +492,7 @@ int main(int argc, char** argv)
 {
     base_dirs = (file_data_t*) calloc(argc, sizeof(file_data_t));
     parse_args(argc, argv);
-    //printf("---------------Calling walkdir--------------\n");
-    //system("grep percent findman.txt > output.txt");
+
     for (int i = 0; i < num_base_dirs; i++)
     {
         walk_dir(base_dirs[i]);
