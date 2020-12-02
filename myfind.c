@@ -42,17 +42,21 @@ int num_base_dirs = 0;
 file_data_t* base_dirs = NULL;
 
 /*
-Returns a new char* containing the directory with the last / removed
+Returns a new char* containing the directory with the last / removed if present
 For example ../exampledir/ becomes ../exampledir. Caller is responsible for 
 deallocating returned char*.
 */
 char* remove_last_slash(const char* directory)
 {
-    int last_char_index = strlen(directory) - 1;
-    if(directory[last_char_index] == '/')
+    if(strlen(directory) > 0)
     {
-        return strndup(directory, last_char_index);
+        int last_char_index = strlen(directory) - 1;
+        if(directory[last_char_index] == '/')
+        {
+            return strndup(directory, last_char_index);
+        }
     }
+    //printf("dir: %s \n", directory);
     return strdup(directory);
 }
 
@@ -76,16 +80,65 @@ char* dir_path_to_dir_name(const char* directory)
 }
 
 /*
+    returns the base_dir that corresponds to path or NULL if path
+    is not a base_dir. A path is considered to be a base dir if the two are the 
+    same ignoring the presence of a trailing slash. 
+*/
+char* matching_base_dir(const char* path)
+{
+    char* new_path = remove_last_slash(path);
+    //printf("new_path: %s\n", path);
+    for (int i = 0; i < num_base_dirs; i++)
+    {
+        if(base_dirs[i].path != NULL)
+        {
+            char* new_base = remove_last_slash(base_dirs[i].path);
+            //printf("cur: %s\n", base_dirs[i].path);
+            //printf("new_base: %s\n", new_base);
+            if(strcmp(new_base, new_path) == 0)
+            {
+                free(new_base);
+                free(new_path);
+                //printf("returned: %s\n path: %s\n", base_dirs[i].path, path);
+                //char* value = strdup(base_dirs[i].path);
+                //printf("old %s\n", base_dirs[i].path);
+                //printf("value %s\n", value);
+                return strdup(base_dirs[i].path);
+            }
+            free(new_base);
+        }
+    }
+    free(new_path);
+    return NULL;
+}
+
+/*
     Takes a complete path as an input such as ../testdir/dir/file.txt or ../testdir/otherdir/
-    prints out the path minus the last slash if it is present
+    prints out the path minus the last slash if it is present base dirs should be printed as typed not
+    following the usual convention.
 */
 void print_match(const char* path)
 {
     int length = strlen(path);
 
-    if(path[length - 1] == '/')
+    // If the path corresponds to a base dir then print it as originally
+    // specified by the user
+
+    char* match;
+    if( (match = matching_base_dir(path) ) != NULL)
     {
-        length--;
+        printf("%s\n", match);
+        free(match);
+        return;
+    }
+
+    // If the path is not a base dir and ends in a slash do not print the slash.
+    if(strlen(path) > 0)
+    {
+        if(path[length - 1] == '/')
+        {
+            length--;
+        }
     }
 
     for (int i = 0; i < length; i++)
@@ -192,15 +245,6 @@ bool handle_exec(file_data_t file)
 }
 
 /*
-    prints the specified file.
-*/
-bool handle_print()
-{
-    //printf("handling print\n");
-    return true;
-}
-
-/*
     returns true if a file meets the requirements.
     returns false otherwise.
 */
@@ -211,7 +255,7 @@ void handle_file(const file_data_t file)
         return;
     }
     if(num_days != -1 && !handle_mtime(file))
-    {
+    { 
         return;
     }
     if(desired_mode != S_IFMT && !handle_type(file))
@@ -268,23 +312,25 @@ char* join_path(const char* directory, const char* file_name)
 
 /*
     Works like stat or lstat depending on value of follow_symbolic
+    returns true if able to get stat info false otherwise
 */
-void get_stat_info(const char* path,  struct stat* statbuffer)
+bool get_stat_info(const char* path,  struct stat* statbuffer)
 {
     if(follow_symbolic)
     {
         if(stat(path, statbuffer) == -1)
         {
-            printf("Unable to get stat info for input file: No such file or directory\n"); 
+            return false;
         }
     }
     else
     {
         if(lstat(path, statbuffer) == -1)
         {
-            printf("Unable to get stat info for input file: No such file or directory\n"); 
+            return false;
         }
     }
+    return true;
 }
 
 /*
@@ -295,13 +341,17 @@ void walk_dir(file_data_t dir_file_data)
     struct dirent *de;
     
     // Every directory handles it self at the beginning
+    //printf("start: %s", dir_file_data.path);
     handle_file(dir_file_data);
 
     DIR* dr = opendir(dir_file_data.path);
 
+    // if the file is not a directory or can not be opened skip it
     if (dr == NULL)
     {
-        perror("unable to open directory");
+        free(dir_file_data.path);
+        free(dir_file_data.file_name);
+        return;
     }
 
     while((de = readdir(dr)) != NULL)
@@ -408,7 +458,7 @@ void get_exec_args(char** argv, int argc, int index)
 
     return;
     //fix this
-    perror("find: missing argument to `-exec'");
+    printf("find: missing argument to `-exec'");
 }
 
 /*
@@ -417,10 +467,43 @@ void get_exec_args(char** argv, int argc, int index)
 void base_path_to_file_data(char* base_path)
 {
     struct stat statbuffer;
-    get_stat_info(base_path, &statbuffer);
-    base_dirs[num_base_dirs].path = base_path;
-    base_dirs[num_base_dirs].file_name = dir_path_to_dir_name(base_path);
-    base_dirs[num_base_dirs].statbuffer = statbuffer;
+    char* base_path_no_slash = remove_last_slash(base_path);
+    if(get_stat_info(base_path, &statbuffer))
+    {
+        base_dirs[num_base_dirs].path = base_path;
+        base_dirs[num_base_dirs].file_name = dir_path_to_dir_name(base_path);
+        base_dirs[num_base_dirs].statbuffer = statbuffer;
+    }
+    else
+    {
+        // create invalid base dir error messages
+        base_dirs[num_base_dirs].path = NULL;
+        char* error_begin;
+        char* error_end;
+
+        if(get_stat_info(base_path_no_slash, &statbuffer))
+        {
+            // Error message for not a directory.
+            error_begin = "find: ‘";
+            error_end = "’: Not a directory";
+        }
+        else
+        {
+            // Error message for no such file or directory
+            error_begin = "find: ‘";
+            error_end = "’: No such file or directory";
+        }
+
+        int filled_template_length = strlen(error_begin) + strlen(error_end) + strlen(base_path) + 1;
+        char* invalid_dir_message = (char*) calloc(filled_template_length, sizeof(char));
+        strcat(strcat(strcat(invalid_dir_message, error_begin), base_path), error_end);
+        
+        // for invalid base dirs the file_name stores the error message
+        base_dirs[num_base_dirs].file_name = invalid_dir_message;
+        free(base_path);
+    }
+    
+    free(base_path_no_slash);
     num_base_dirs += 1;
 }
 
@@ -470,6 +553,11 @@ void parse_args(int argc, char** argv)
             {
                 should_print = true;  
             }
+            else
+            {
+                printf("find: unknown predicate `%s'\n", argv[i]);
+                exit(1);
+            }
         }
         else if(more_start_dirs)
         {
@@ -490,12 +578,34 @@ void parse_args(int argc, char** argv)
 
 int main(int argc, char** argv)
 {
+    // base_dirs should not be global.
     base_dirs = (file_data_t*) calloc(argc, sizeof(file_data_t));
     parse_args(argc, argv);
 
     for (int i = 0; i < num_base_dirs; i++)
     {
-        walk_dir(base_dirs[i]);
+        // Only attempt to walk valid directories.
+        if(base_dirs[i].path != NULL)
+        {
+            file_data_t cur_base_dir;
+            cur_base_dir.path = strdup(base_dirs[i].path);
+            cur_base_dir.file_name = strdup(base_dirs[i].file_name);
+            cur_base_dir.statbuffer = base_dirs[i].statbuffer;
+            walk_dir(cur_base_dir);
+        }
+        else
+        {
+            // for invalid base dirs the file_name stores the error message
+            printf("%s\n", base_dirs[i].file_name);
+            //free(base_dirs[i].file_name);
+        }
+    }
+
+
+    for (int i = 0; i < num_base_dirs; i++)
+    {
+        free(base_dirs[i].path);
+        free(base_dirs[i].file_name);
     }
     free(base_dirs);
 
