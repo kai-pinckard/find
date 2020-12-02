@@ -674,7 +674,7 @@ void parse_args(int argc, char** argv)
     {
         base_path_to_file_data(strdup("./"));
     }
-
+    free(prev_option);
     //printf("----------------end parse--------------------\n");
 }
 
