@@ -10,26 +10,32 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <fcntl.h>
+#include <ctype.h>
 
-// Globals consider removing
 const int NUM_SECS_PER_DAY = 86400;
+// For -name, by default not used
 char* pattern = NULL;
-
+// For -mtime, by default num_days is not used
 int num_days = -1;
-// By default any file should be matched.
-mode_t desired_mode = S_IFMT;
-// This stores the arguments to exec
+// Stores all modes that will be accepted.
+mode_t* desired_modes = NULL;
+int num_modes = 0;
+// This stores the arguments to -exec
 char* exec_args = NULL;
 // By default assume the user has not specified -print
+// This does not mean that nothing is printed
 bool should_print = false;
 // By default do not follow symbolic links
 bool follow_symbolic = false;
 
+// A convenient structure to hold file data.
 typedef struct 
 {
+    // Store the file path
     // for example ../testdir/file.txt
     // or ./subdir/subsubdir/
     char* path;
+    // Store the file_name
     // for example file.txt
     // subsubdir
     char* file_name;
@@ -38,13 +44,19 @@ typedef struct
 
 } file_data_t;
 
+
+// These are needed to keep track of the original base dirs
+// specified by the user. They are stored globally because
+// base dirs should ignore normal formatting and be printed with
+// the original formatting the user used. (ie if "/" was used or not at the end).
+
 int num_base_dirs = 0;
 file_data_t* base_dirs = NULL;
 
 /*
-Returns a new char* containing the directory with the last / removed if present
-For example ../exampledir/ becomes ../exampledir. Caller is responsible for 
-deallocating returned char*.
+    Returns a new char* containing the directory with the last '/' removed if present
+    For example ../exampledir/ becomes ../exampledir. Caller is responsible for 
+    deallocating returned char*. Assumes directory is not NULL.
 */
 char* remove_last_slash(const char* directory)
 {
@@ -56,11 +68,11 @@ char* remove_last_slash(const char* directory)
             return strndup(directory, last_char_index);
         }
     }
-    //printf("dir: %s \n", directory);
     return strdup(directory);
 }
 
 /*
+    Returns the dir_name in a new char* caller is responsible for deallocating.
     For example ../dir/exampledir/ becomes exampledir
 */
 char* dir_path_to_dir_name(const char* directory)
@@ -80,29 +92,22 @@ char* dir_path_to_dir_name(const char* directory)
 }
 
 /*
-    returns the base_dir that corresponds to path or NULL if path
-    is not a base_dir. A path is considered to be a base dir if the two are the 
+    Returns the base_dir that corresponds to path or NULL if path
+    is not a base_dir. A path corresponds to a base_dir if the two are the 
     same ignoring the presence of a trailing slash. 
 */
 char* matching_base_dir(const char* path)
 {
     char* new_path = remove_last_slash(path);
-    //printf("new_path: %s\n", path);
     for (int i = 0; i < num_base_dirs; i++)
     {
         if(base_dirs[i].path != NULL)
         {
             char* new_base = remove_last_slash(base_dirs[i].path);
-            //printf("cur: %s\n", base_dirs[i].path);
-            //printf("new_base: %s\n", new_base);
             if(strcmp(new_base, new_path) == 0)
             {
                 free(new_base);
                 free(new_path);
-                //printf("returned: %s\n path: %s\n", base_dirs[i].path, path);
-                //char* value = strdup(base_dirs[i].path);
-                //printf("old %s\n", base_dirs[i].path);
-                //printf("value %s\n", value);
                 return strdup(base_dirs[i].path);
             }
             free(new_base);
@@ -114,8 +119,8 @@ char* matching_base_dir(const char* path)
 
 /*
     Takes a complete path as an input such as ../testdir/dir/file.txt or ../testdir/otherdir/
-    prints out the path minus the last slash if it is present base dirs should be printed as typed not
-    following the usual convention.
+    prints out the path minus the last slash if it is present. However, base dirs are be printed as specified by the
+    user and not following the usual convention.
 */
 void print_match(const char* path)
 {
@@ -150,11 +155,10 @@ void print_match(const char* path)
 
 /*
     Returns true if the file_name matches the pattern. The pattern
-    is simply whatever was passed for -name
+    is the value passed to -name
 */
 bool handle_name(const char* pattern, const char* file_name)
 {
-    //printf("handling name with pattern %s\n", pattern);
     return fnmatch(pattern, file_name, 0) == 0;
 }
 
@@ -170,9 +174,10 @@ bool occurred_within(const time_t current_time, const time_t m_time, const int n
     time_t time_dif = current_time - m_time;
     return time_dif < max_dif && time_dif > min_dif;
 }
+
 /*
     Returns true if the file specified by file_name was modified at
-    mtime. note +/- features not implemented. 
+    mtime. Note +/- features not implemented. 
 */
 bool handle_mtime(const file_data_t file)
 {
@@ -187,12 +192,28 @@ bool handle_mtime(const file_data_t file)
 */
 bool handle_type(const file_data_t file)
 {
-    //printf("handling type\n");
-    return (file.statbuffer.st_mode & S_IFMT) == desired_mode;
+    // If -type was not specified
+    if(num_modes == 0)
+    {
+        return (file.statbuffer.st_mode & S_IFMT) == S_IFMT;
+    }
+    else
+    {
+        // return true if the type matches any of the accepted types.
+        for(int i = 0; i < num_modes; i++)
+        {
+            if((file.statbuffer.st_mode & S_IFMT) == desired_modes[i])
+            {
+                return true;
+            }
+        }
+        return false;
+    }
 }
 
 /* 
-    fill the brackets in exec_args and return a new string caller must free
+    Populate the brackets in exec_args with the file path and return a new string.
+    Caller is responsible for deallocating the returned string.
 */
 char* populate_command(file_data_t file)
 {
@@ -236,7 +257,8 @@ char* populate_command(file_data_t file)
 }
 
 /*
-    executes the specified command on all the file specified.
+    Executes the specified command on all the file specified. Returns true if
+    the command succeeded and false otherwise.
 */
 bool handle_exec(file_data_t file)
 {
@@ -245,8 +267,9 @@ bool handle_exec(file_data_t file)
 }
 
 /*
-    returns true if a file meets the requirements.
-    returns false otherwise.
+    Checks if a file matches all the requirements specified by the options
+    then either executes a command on it or prints it out as required by the
+    specified options.
 */
 void handle_file(const file_data_t file)
 {
@@ -258,7 +281,7 @@ void handle_file(const file_data_t file)
     { 
         return;
     }
-    if(desired_mode != S_IFMT && !handle_type(file))
+    if(num_modes > 0 && !handle_type(file))
     {
         return;
     }
@@ -273,7 +296,7 @@ void handle_file(const file_data_t file)
 }
 
 /*
-    returns a new string that the caller must deallocate that contains the trailing
+    Returns a new string that the caller must deallocate that contains a trailing
     slash.
 */
 char* add_slash(const char* directory)
@@ -312,7 +335,7 @@ char* join_path(const char* directory, const char* file_name)
 
 /*
     Works like stat or lstat depending on value of follow_symbolic
-    returns true if able to get stat info false otherwise
+    returns true if able to get stat info false otherwise.
 */
 bool get_stat_info(const char* path,  struct stat* statbuffer)
 {
@@ -334,19 +357,19 @@ bool get_stat_info(const char* path,  struct stat* statbuffer)
 }
 
 /*
-    Recursively traverses the directory applying the specified function on each file
+    Recursively traverses the specified directory calling handle_file on each
+    file or directory in encountered during the traversal.
 */
 void walk_dir(file_data_t dir_file_data)
 {
     struct dirent *de;
     
     // Every directory handles it self at the beginning
-    //printf("start: %s", dir_file_data.path);
     handle_file(dir_file_data);
 
     DIR* dr = opendir(dir_file_data.path);
 
-    // if the file is not a directory or can not be opened skip it
+    // if dir_file_data is not a directory or can not be opened skip it
     if (dr == NULL)
     {
         free(dir_file_data.path);
@@ -354,6 +377,7 @@ void walk_dir(file_data_t dir_file_data)
         return;
     }
 
+    // Get each of the directory entries and handle them as well.
     while((de = readdir(dr)) != NULL)
     {
         // Check that the current item is not . or ..
@@ -369,20 +393,19 @@ void walk_dir(file_data_t dir_file_data)
             // Check if the file is of type directory
             if((cur_file.statbuffer.st_mode & S_IFMT) == S_IFDIR)
             {
+                // Only follow symbolic links if specified
                 if((cur_file.statbuffer.st_mode & S_IFMT) != S_IFLNK || follow_symbolic)
                 {
-                    //printf("path %s\n", path);
                     char* new_path = add_slash(cur_file.path);
                     free(cur_file.path);
                     cur_file.path = new_path;
+                    // Call this function again on each sub directory
                     walk_dir(cur_file);
                 }
             }
             else
             {
-                // No directories are handled here
-                //printf("value %d\n", (int) follow_symbolic);
-                //printf("cur: %s", cur_file.path);
+                // No subdirectories are handled here
                 handle_file(cur_file);
                 free(cur_file.path);
                 free(cur_file.file_name);
@@ -410,22 +433,53 @@ mode_t get_mode_mask(char mode_specifier)
         case 'f': return S_IFREG;
         case 'l': return S_IFLNK;
         case 's': return S_IFSOCK;
-        //case 'D': return
-        default: perror("unexpected mode");
-        return S_IFMT;
+        //case 'D': return 
+        default: 
+            printf("find: Unknown argument to -type: %c\n", mode_specifier);
+            exit(1);
     }
 }
-//update for multiple chars
-mode_t arg_to_mode(char** argv, int index)
+
+/*
+    Parses the arguments to -type. Stores the results in global 
+    desired_modes and updates num_modes to the correct number.
+*/
+void arg_to_mode(char** argv, int index)
 {
+    // Holds the string the mode specifications.
     char* mode_specifier = argv[index+1];
-    if(strlen(mode_specifier) != 1)
+    int length = strlen(mode_specifier);
+   
+    // Reserve space storing modes.
+    desired_modes = (mode_t*) calloc(length % 2 + length / 2, sizeof(mode_t));
+
+    // Keep track of if we are expecting another mode.
+    bool needs_mode = false;
+    for(int i = 0; i < length; i++)
     {
-        perror("invalid mode");
+        // if i is odd then it must be a ','
+        if(i % 2 == 1)
+        {
+            // We are expecting another argument to -type since there was a preceeding ','
+            needs_mode = true;
+            if(mode_specifier[i] != ',')
+            {
+                printf("find: Must separate multiple arguments to -type using: ','\n");
+                exit(1);
+            }
+        }
+        else
+        {
+            needs_mode = false;
+            desired_modes[num_modes] = get_mode_mask(mode_specifier[i]);
+            num_modes += 1;
+        }
     }
-    char mode = mode_specifier[0];
-    mode_t mode_mask = get_mode_mask(mode);
-    return mode_mask;
+    if(needs_mode)
+    {
+        printf("find: Last file type in list argument to -type is missing, i.e., list is ending on: ','\n");
+        exit(1);
+    }
 }
 
 /*
@@ -517,6 +571,23 @@ void base_path_to_file_data(char* base_path)
 }
 
 /*
+    Checks if the arg isnumeric() if it is the numeric
+    value is extracted with atoi and stored in num_days.
+*/
+void parse_mtime(char* arg)
+{
+    for(int i = 0; i < strlen(arg); i++)
+    {
+        if(!isdigit(arg[i]))
+        {
+            printf("find: invalid argument `%s' to `-mtime'\n", arg);
+            exit(1);
+        }
+    }
+    num_days = atoi(arg);
+}
+
+/*
     Returns the next argument fol
 */
 void parse_args(int argc, char** argv)
@@ -543,13 +614,17 @@ void parse_args(int argc, char** argv)
             else if(strcmp(argv[i], "-mtime") == 0)
             {
                 //handle_mtime();
-                num_days = atoi(argv[i+1]);
+                parse_mtime(argv[i+1]);
+                // Increment i to skip parsing the argument to -mtime twice.
+                i++;
                 //printf("num days: %d\n", num_days);
             }
             else if(strcmp(argv[i], "-type") == 0)
             {
                 //handle_type();
-                desired_mode = arg_to_mode(argv, i);
+                arg_to_mode(argv, i);
+                // Increment i to skip parsing the argument to -type twice.
+                i++;
                 //printf("desired mode: %d\n", desired_mode);
             }
             else if(strcmp(argv[i], "-exec") == 0)
@@ -574,6 +649,7 @@ void parse_args(int argc, char** argv)
         }
         else
         {
+            printf("find: paths must precede expression: `%s'\n", argv[i]);
             //printf("probably should not be here %s\n",argv[i]);
         }
     }
