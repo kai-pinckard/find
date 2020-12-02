@@ -594,11 +594,16 @@ void parse_args(int argc, char** argv)
 {
     //printf("------------------start parse--------------------\n");
     bool more_start_dirs = true;
+
+    // Store the previous option for error messages allocate memory now so it can be freed later
+    char* prev_option = (char*) calloc(1, sizeof(char));
     for(int i = 1; i < argc; i++)
     {
         // Check for -L first since we don't want to interpret it as a regular option.
         if(strcmp(argv[i], "-L") == 0)
         {
+            free(prev_option);
+            prev_option = strdup("-L");
             follow_symbolic = true;
         }
         // Check the current arg is an option
@@ -609,11 +614,17 @@ void parse_args(int argc, char** argv)
 
             if(strcmp(argv[i], "-name") == 0)
             {
+                free(prev_option);
+                prev_option = strdup("-name");
                 pattern = argv[i+1];
+                // Increment i to skip parsing the argument to -mtime twice.
+                i++;
             }
             else if(strcmp(argv[i], "-mtime") == 0)
             {
                 //handle_mtime();
+                free(prev_option);
+                prev_option = strdup("-mtime");
                 parse_mtime(argv[i+1]);
                 // Increment i to skip parsing the argument to -mtime twice.
                 i++;
@@ -622,6 +633,8 @@ void parse_args(int argc, char** argv)
             else if(strcmp(argv[i], "-type") == 0)
             {
                 //handle_type();
+                free(prev_option);
+                prev_option = strdup("-type");
                 arg_to_mode(argv, i);
                 // Increment i to skip parsing the argument to -type twice.
                 i++;
@@ -629,12 +642,16 @@ void parse_args(int argc, char** argv)
             }
             else if(strcmp(argv[i], "-exec") == 0)
             {
+                free(prev_option);
+                prev_option = strdup("-exec");
                 get_exec_args(argv, argc, &i);
                 continue;
                 
             }
             else if(strcmp(argv[i], "-print") == 0)
             {
+                free(prev_option);
+                prev_option = strdup("-mtime");
                 should_print = true;  
             }
             else
@@ -650,7 +667,7 @@ void parse_args(int argc, char** argv)
         else
         {
             printf("find: paths must precede expression: `%s'\n", argv[i]);
-            //printf("probably should not be here %s\n",argv[i]);
+            printf("find: possible unquoted pattern after predicate `%s'?\n", prev_option);
         }
     }
     if(num_base_dirs == 0)
