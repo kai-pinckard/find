@@ -166,7 +166,7 @@ bool occurred_within(const time_t current_time, const time_t m_time, const int n
 {
     
     long int max_dif = NUM_SECS_PER_DAY * (num_days + 1);
-    long int min_dif = num_days * num_days;
+    long int min_dif = NUM_SECS_PER_DAY * num_days;
     time_t time_dif = current_time - m_time;
     return time_dif < max_dif && time_dif > min_dif;
 }
@@ -371,7 +371,7 @@ void walk_dir(file_data_t dir_file_data)
             {
                 if((cur_file.statbuffer.st_mode & S_IFMT) != S_IFLNK || follow_symbolic)
                 {
-                    //printf("%s\n", path);
+                    //printf("path %s\n", path);
                     char* new_path = add_slash(cur_file.path);
                     free(cur_file.path);
                     cur_file.path = new_path;
@@ -381,6 +381,8 @@ void walk_dir(file_data_t dir_file_data)
             else
             {
                 // No directories are handled here
+                //printf("value %d\n", (int) follow_symbolic);
+                //printf("cur: %s", cur_file.path);
                 handle_file(cur_file);
                 free(cur_file.path);
                 free(cur_file.file_name);
@@ -427,16 +429,17 @@ mode_t arg_to_mode(char** argv, int index)
 }
 
 /*
-    UPdate comment
+    parses the exec commands starting at index index and updates index to hold
+    the the index of the semicolon
 */
-void get_exec_args(char** argv, int argc, int index)
+void get_exec_args(char** argv, int argc, int* index)
 {
 
     int semicolon_index = -1; 
 
     // start at one so we dont have to add space for terminating char later.
     int exec_args_len = 1;
-    for(int i = index + 1; i < argc; i++)
+    for(int i = *index + 1; i < argc; i++)
     {
         if (argv[i][0] == ';' && argv[i][1] == '\0')
         {
@@ -450,15 +453,21 @@ void get_exec_args(char** argv, int argc, int index)
         }
     }
     exec_args = (char*) calloc(exec_args_len, sizeof(char));
-    for(int i = index + 1; i < semicolon_index; i++)
+    for(int i = *index + 1; i < semicolon_index; i++)
     {
         //printf("debug %d %s\n", i, argv[i]);
         strcat(strcat(exec_args, argv[i]), " ");
     }
-
+    if(semicolon_index == -1)
+    {
+        printf("find: missing argument to `-exec'\n");
+        exit(1);
+    }
+    else
+    {
+        *index = semicolon_index;
+    }
     return;
-    //fix this
-    printf("find: missing argument to `-exec'");
 }
 
 /*
@@ -502,7 +511,7 @@ void base_path_to_file_data(char* base_path)
         base_dirs[num_base_dirs].file_name = invalid_dir_message;
         free(base_path);
     }
-    
+
     free(base_path_no_slash);
     num_base_dirs += 1;
 }
@@ -545,7 +554,7 @@ void parse_args(int argc, char** argv)
             }
             else if(strcmp(argv[i], "-exec") == 0)
             {
-                get_exec_args(argv, argc, i);
+                get_exec_args(argv, argc, &i);
                 continue;
                 
             }
@@ -588,19 +597,23 @@ int main(int argc, char** argv)
         if(base_dirs[i].path != NULL)
         {
             file_data_t cur_base_dir;
-            cur_base_dir.path = strdup(base_dirs[i].path);
-            cur_base_dir.file_name = strdup(base_dirs[i].file_name);
-            cur_base_dir.statbuffer = base_dirs[i].statbuffer;
-            walk_dir(cur_base_dir);
+            if((base_dirs[i].statbuffer.st_mode & S_IFMT) == S_IFDIR)
+            {
+                cur_base_dir.path = strdup(base_dirs[i].path);
+                cur_base_dir.file_name = strdup(base_dirs[i].file_name);
+                cur_base_dir.statbuffer = base_dirs[i].statbuffer;
+                walk_dir(cur_base_dir);
+            }
+            else
+            {
+                printf("%s\n", base_dirs[i].path);
+            }
         }
         else
         {
-            // for invalid base dirs the file_name stores the error message
             printf("%s\n", base_dirs[i].file_name);
-            //free(base_dirs[i].file_name);
         }
     }
-
 
     for (int i = 0; i < num_base_dirs; i++)
     {
