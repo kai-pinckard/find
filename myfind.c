@@ -1,3 +1,9 @@
+/*
+
+    Project 4: find
+    Completed by: Kai Pinckard
+
+*/
 #include <stdio.h>
 #include <sys/types.h>
 #include <dirent.h>
@@ -65,10 +71,22 @@ char* remove_last_slash(const char* directory)
         int last_char_index = strlen(directory) - 1;
         if(directory[last_char_index] == '/')
         {
-            return strndup(directory, last_char_index);
+            char* dir_no_slash = strndup(directory, last_char_index);
+            if(dir_no_slash == NULL)
+            {
+                printf("find: insufficient memory\n");
+                exit(1);
+            }
+            return dir_no_slash;
         }
     }
-    return strdup(directory);
+    char* dir_no_slash = strdup(directory);
+    if(dir_no_slash == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
+    return dir_no_slash;
 }
 
 /*
@@ -85,6 +103,11 @@ char* dir_path_to_dir_name(const char* directory)
     {
         // copy str starting from the next char on.
         char* dir_name = strdup(start_pos + 1);
+        if(dir_name == NULL)
+        {
+            printf("find: insufficient memory\n");
+            exit(1);
+        }
         free(dir_path_no_slash);
         return dir_name;
     }
@@ -108,7 +131,13 @@ char* matching_base_dir(const char* path)
             {
                 free(new_base);
                 free(new_path);
-                return strdup(base_dirs[i].path);
+                char* matching_base_dir = strdup(base_dirs[i].path);
+                if(matching_base_dir == NULL)
+                {
+                    printf("find: insufficient memory\n");
+                    exit(1);
+                }
+                return matching_base_dir;
             }
             free(new_base);
         }
@@ -233,6 +262,11 @@ char* populate_command(file_data_t file)
     }
 
     char* filled_exec_args = (char*) calloc(length, sizeof(char));
+    if(filled_exec_args == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
 
     int filled_str_index = 0;
     for (unsigned long int original_index = 0; original_index < strlen(exec_args);)
@@ -257,13 +291,15 @@ char* populate_command(file_data_t file)
 }
 
 /*
-    Executes the specified command on all the file specified. Returns true if
+    Executes the specified command on the file specified. Returns true if
     the command succeeded and false otherwise.
 */
 bool handle_exec(file_data_t file)
 {
     char* filled_exec_args = populate_command(file);
-    return system(filled_exec_args) == 0;
+    bool return_value = system(filled_exec_args) == 0;
+    free(filled_exec_args);
+    return return_value;
 }
 
 /*
@@ -303,6 +339,11 @@ char* add_slash(const char* directory)
 {
     int length = strlen(directory) + 2;
     char* dir = (char*) calloc(length, sizeof(char));
+    if(dir == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
     return strcat(strcat(dir, directory), "/");
 }
 
@@ -323,6 +364,11 @@ char* join_path(const char* directory, const char* file_name)
     }
 
     char* path = (char*) calloc(total_length, sizeof(char));
+    if(path == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
     strcat(path, directory);
 
     if(needs_slash)
@@ -372,6 +418,7 @@ void walk_dir(file_data_t dir_file_data)
     // if dir_file_data is not a directory or can not be opened skip it
     if (dr == NULL)
     {
+        printf("find: ‘%s’: Permission denied\n", dir_file_data.path);
         free(dir_file_data.path);
         free(dir_file_data.file_name);
         return;
@@ -384,6 +431,11 @@ void walk_dir(file_data_t dir_file_data)
         if ( (strcmp(de->d_name, "..") != 0 ) && (strcmp(de->d_name, ".") != 0) )
         {
             char* file_name = strdup(de->d_name);
+            if(file_name == NULL)
+            {
+                printf("find: insufficient memory\n");
+                exit(1);
+            }
             char* path = join_path(dir_file_data.path, de->d_name);
 
             struct stat statbuffer;
@@ -452,6 +504,11 @@ void arg_to_mode(char** argv, int index)
    
     // Reserve space storing modes.
     desired_modes = (mode_t*) calloc(length % 2 + length / 2, sizeof(mode_t));
+    if(desired_modes == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
 
     // Keep track of if we are expecting another mode.
     bool needs_mode = false;
@@ -507,9 +564,13 @@ void get_exec_args(char** argv, int argc, int* index)
         }
     }
     exec_args = (char*) calloc(exec_args_len, sizeof(char));
+    if(exec_args == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
     for(int i = *index + 1; i < semicolon_index; i++)
     {
-        //printf("debug %d %s\n", i, argv[i]);
         strcat(strcat(exec_args, argv[i]), " ");
     }
     if(semicolon_index == -1)
@@ -525,7 +586,7 @@ void get_exec_args(char** argv, int argc, int* index)
 }
 
 /*
-    adds another base dir to the global base_dirs char**
+    adds another base dir to the global base_dirs
 */
 void base_path_to_file_data(char* base_path)
 {
@@ -541,24 +602,27 @@ void base_path_to_file_data(char* base_path)
     {
         // create invalid base dir error messages
         base_dirs[num_base_dirs].path = NULL;
-        char* error_begin;
+        char* error_begin = "find: ‘";
         char* error_end;
 
         if(get_stat_info(base_path_no_slash, &statbuffer))
         {
             // Error message for not a directory.
-            error_begin = "find: ‘";
             error_end = "’: Not a directory";
         }
         else
         {
             // Error message for no such file or directory
-            error_begin = "find: ‘";
             error_end = "’: No such file or directory";
         }
 
         int filled_template_length = strlen(error_begin) + strlen(error_end) + strlen(base_path) + 1;
         char* invalid_dir_message = (char*) calloc(filled_template_length, sizeof(char));
+        if(invalid_dir_message == NULL)
+        {
+            printf("find: insufficient memory\n");
+            exit(1);
+        }
         strcat(strcat(strcat(invalid_dir_message, error_begin), base_path), error_end);
         
         // for invalid base dirs the file_name stores the error message
@@ -571,12 +635,12 @@ void base_path_to_file_data(char* base_path)
 }
 
 /*
-    Checks if the arg isnumeric() if it is the numeric
+    Checks if the arg isdigit(). If it is, the numeric
     value is extracted with atoi and stored in num_days.
 */
 void parse_mtime(char* arg)
 {
-    for(int i = 0; i < strlen(arg); i++)
+    for(long unsigned int i = 0; i < strlen(arg); i++)
     {
         if(!isdigit(arg[i]))
         {
@@ -588,15 +652,20 @@ void parse_mtime(char* arg)
 }
 
 /*
-    Returns the next argument fol
+    Parses all of the arguments to myfind. Most are stored as global variables as they change
+    the behavior of the entire program. 
 */
 void parse_args(int argc, char** argv)
 {
-    //printf("------------------start parse--------------------\n");
     bool more_start_dirs = true;
 
     // Store the previous option for error messages allocate memory now so it can be freed later
     char* prev_option = (char*) calloc(1, sizeof(char));
+    if(prev_option == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
     for(int i = 1; i < argc; i++)
     {
         // Check for -L first since we don't want to interpret it as a regular option.
@@ -604,18 +673,27 @@ void parse_args(int argc, char** argv)
         {
             free(prev_option);
             prev_option = strdup("-L");
+            if(prev_option == NULL)
+            {
+                printf("find: insufficient memory\n");
+                exit(1);
+            }
             follow_symbolic = true;
         }
         // Check the current arg is an option
         else if(argv[i][0] == '-')
         {
             more_start_dirs = false;
-            //printf("option %s\n", argv[i]);
 
             if(strcmp(argv[i], "-name") == 0)
             {
                 free(prev_option);
                 prev_option = strdup("-name");
+                if(prev_option == NULL)
+                {
+                    printf("find: insufficient memory\n");
+                    exit(1);
+                }
                 pattern = argv[i+1];
                 // Increment i to skip parsing the argument to -mtime twice.
                 i++;
@@ -625,25 +703,38 @@ void parse_args(int argc, char** argv)
                 //handle_mtime();
                 free(prev_option);
                 prev_option = strdup("-mtime");
+                if(prev_option == NULL)
+                {
+                    printf("find: insufficient memory\n");
+                    exit(1);
+                }
                 parse_mtime(argv[i+1]);
                 // Increment i to skip parsing the argument to -mtime twice.
                 i++;
-                //printf("num days: %d\n", num_days);
             }
             else if(strcmp(argv[i], "-type") == 0)
             {
                 //handle_type();
                 free(prev_option);
                 prev_option = strdup("-type");
+                if(prev_option == NULL)
+                {
+                    printf("find: insufficient memory\n");
+                    exit(1);
+                }
                 arg_to_mode(argv, i);
                 // Increment i to skip parsing the argument to -type twice.
                 i++;
-                //printf("desired mode: %d\n", desired_mode);
             }
             else if(strcmp(argv[i], "-exec") == 0)
             {
                 free(prev_option);
                 prev_option = strdup("-exec");
+                if(prev_option == NULL)
+                {
+                    printf("find: insufficient memory\n");
+                    exit(1);
+                }
                 get_exec_args(argv, argc, &i);
                 continue;
                 
@@ -652,6 +743,11 @@ void parse_args(int argc, char** argv)
             {
                 free(prev_option);
                 prev_option = strdup("-mtime");
+                if(prev_option == NULL)
+                {
+                    printf("find: insufficient memory\n");
+                    exit(1);
+                }
                 should_print = true;  
             }
             else
@@ -662,7 +758,13 @@ void parse_args(int argc, char** argv)
         }
         else if(more_start_dirs)
         {
-            base_path_to_file_data(strdup(argv[i]));
+            char* copy = strdup(argv[i]);
+            if(copy == NULL)
+            {
+                printf("find: insufficient memory\n");
+                exit(1);
+            }
+            base_path_to_file_data(copy);
         }
         else
         {
@@ -670,18 +772,28 @@ void parse_args(int argc, char** argv)
             printf("find: possible unquoted pattern after predicate `%s'?\n", prev_option);
         }
     }
+    // If no base_dir was specified use "./"
     if(num_base_dirs == 0)
     {
-        base_path_to_file_data(strdup("./"));
+        char* copy = strdup("./");
+        if(copy == NULL)
+        {
+            printf("find: insufficient memory\n");
+            exit(1);
+        }
+        base_path_to_file_data(copy);
     }
     free(prev_option);
-    //printf("----------------end parse--------------------\n");
 }
 
 int main(int argc, char** argv)
 {
-    // base_dirs should not be global.
     base_dirs = (file_data_t*) calloc(argc, sizeof(file_data_t));
+    if(base_dirs == NULL)
+    {
+        printf("find: insufficient memory\n");
+        exit(1);
+    }
     parse_args(argc, argv);
 
     for (int i = 0; i < num_base_dirs; i++)
@@ -694,6 +806,13 @@ int main(int argc, char** argv)
             {
                 cur_base_dir.path = strdup(base_dirs[i].path);
                 cur_base_dir.file_name = strdup(base_dirs[i].file_name);
+                // check that strdup succeeded
+                if(cur_base_dir.path == NULL || cur_base_dir.file_name == NULL)
+                {
+                    printf("find: insufficient memory\n");
+                    exit(1);
+                }
+
                 cur_base_dir.statbuffer = base_dirs[i].statbuffer;
                 walk_dir(cur_base_dir);
             }
@@ -714,6 +833,7 @@ int main(int argc, char** argv)
         free(base_dirs[i].file_name);
     }
     free(base_dirs);
-
+    free(desired_modes);
+    free(exec_args);
     return 0;
 }
