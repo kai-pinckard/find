@@ -726,6 +726,11 @@ void parse_args(int argc, char** argv)
                     printf("find: insufficient memory\n");
                     exit(1);
                 }
+                if(argv[i+1] == NULL)
+                {
+                    printf("find: missing argument to `-name'\n");
+                    exit(1);
+                }
                 pattern = argv[i+1];
                 // Increment i to skip parsing the argument to -mtime twice.
                 i++;
@@ -739,6 +744,11 @@ void parse_args(int argc, char** argv)
                 if(prev_option == NULL)
                 {
                     printf("find: insufficient memory\n");
+                    exit(1);
+                }
+                if(argv[i+1] == NULL)
+                {
+                    printf("find: missing argument to `-mtime'\n");
                     exit(1);
                 }
                 parse_mtime(argv[i+1]);
@@ -756,6 +766,11 @@ void parse_args(int argc, char** argv)
                     printf("find: insufficient memory\n");
                     exit(1);
                 }
+                if(argv[i+1] == NULL)
+                {
+                    printf("find: missing argument to `-type'\n");
+                    exit(1);
+                }
                 arg_to_mode(argv, i);
                 // Increment i to skip parsing the argument to -type twice.
                 i++;
@@ -768,6 +783,11 @@ void parse_args(int argc, char** argv)
                 if(prev_option == NULL)
                 {
                     printf("find: insufficient memory\n");
+                    exit(1);
+                }
+                if(argv[i+1] == NULL)
+                {
+                    printf("find: missing argument to `-exec'\n");
                     exit(1);
                 }
                 get_exec_args(argv, argc, &i);
