@@ -33,6 +33,10 @@ char* exec_args = NULL;
 bool should_print = false;
 // By default do not follow symbolic links
 bool follow_symbolic = false;
+// This is used to store the order arguments occur in.
+char** opt_order = NULL;
+// This is used to keep track of the length of opt_order
+int opt_order_len = 0;
 
 // A convenient structure to hold file data.
 typedef struct 
@@ -309,26 +313,53 @@ bool handle_exec(file_data_t file)
 */
 void handle_file(const file_data_t file)
 {
-    if(pattern != NULL && !handle_name(pattern, file.file_name))
+    // used to check if default printing behavior should kick in.
+    bool already_printed = false;
+
+    // handle the options in the order they were passed in.
+    for(int i = 0; i < opt_order_len; i++)
     {
-        return;
+        if(strcmp(opt_order[i], "-name") == 0)
+        {
+            if(pattern != NULL && !handle_name(pattern, file.file_name))
+            {
+                return;
+            }
+        }
+        else if(strcmp(opt_order[i], "-mtime") == 0)
+        {
+            if(num_days != -1 && !handle_mtime(file))
+            { 
+                return;
+            }
+        }
+        else if(strcmp(opt_order[i], "-type") == 0)
+        {
+            if(num_modes > 0 && !handle_type(file))
+            {
+                return;
+            }
+        }
+        else if(strcmp(opt_order[i], "-exec") == 0)
+        {
+            if(exec_args != NULL && !handle_exec(file))
+            {
+                return;
+            } 
+        }
+        else if(strcmp(opt_order[i], "-print") == 0)
+        {
+            if(exec_args == NULL || should_print)
+            {
+                print_match(file.path);
+            }
+            already_printed = true;
+        }
     }
-    if(num_days != -1 && !handle_mtime(file))
-    { 
-        return;
-    }
-    if(num_modes > 0 && !handle_type(file))
-    {
-        return;
-    }
-    if(exec_args != NULL && !handle_exec(file))
-    {
-        return;
-    }
-    if(exec_args == NULL || should_print)
+    if( (already_printed == false) && (exec_args == NULL || should_print) )
     {
         print_match(file.path);
-    }
+    }   
 }
 
 /*
@@ -418,7 +449,9 @@ void walk_dir(file_data_t dir_file_data)
     // if dir_file_data is not a directory or can not be opened skip it
     if (dr == NULL)
     {
-        printf("find: ‘%s’: Permission denied\n", dir_file_data.path);
+        char* error_path = remove_last_slash(dir_file_data.path);
+        printf("find: ‘%s’: Permission denied\n", error_path);
+        free(error_path);
         free(dir_file_data.path);
         free(dir_file_data.file_name);
         return;
@@ -659,20 +692,18 @@ void parse_args(int argc, char** argv)
 {
     bool more_start_dirs = true;
 
-    // Store the previous option for error messages allocate memory now so it can be freed later
-    char* prev_option = (char*) calloc(1, sizeof(char));
-    if(prev_option == NULL)
-    {
-        printf("find: insufficient memory\n");
-        exit(1);
-    }
+    // allocate space to store the order of the options. this is an overestimate
+    opt_order = (char**) calloc(argc, sizeof(char*));
+
+    char* prev_option;
     for(int i = 1; i < argc; i++)
     {
         // Check for -L first since we don't want to interpret it as a regular option.
         if(strcmp(argv[i], "-L") == 0)
         {
-            free(prev_option);
-            prev_option = strdup("-L");
+            opt_order[opt_order_len] = strdup("-L");
+            prev_option = opt_order[opt_order_len];
+            opt_order_len += 1;
             if(prev_option == NULL)
             {
                 printf("find: insufficient memory\n");
@@ -687,8 +718,9 @@ void parse_args(int argc, char** argv)
 
             if(strcmp(argv[i], "-name") == 0)
             {
-                free(prev_option);
-                prev_option = strdup("-name");
+                opt_order[opt_order_len] = strdup("-name");
+                prev_option = opt_order[opt_order_len];
+                opt_order_len += 1;
                 if(prev_option == NULL)
                 {
                     printf("find: insufficient memory\n");
@@ -701,8 +733,9 @@ void parse_args(int argc, char** argv)
             else if(strcmp(argv[i], "-mtime") == 0)
             {
                 //handle_mtime();
-                free(prev_option);
-                prev_option = strdup("-mtime");
+                opt_order[opt_order_len] = strdup("-mtime");
+                prev_option = opt_order[opt_order_len];
+                opt_order_len += 1;
                 if(prev_option == NULL)
                 {
                     printf("find: insufficient memory\n");
@@ -715,8 +748,9 @@ void parse_args(int argc, char** argv)
             else if(strcmp(argv[i], "-type") == 0)
             {
                 //handle_type();
-                free(prev_option);
-                prev_option = strdup("-type");
+                opt_order[opt_order_len] = strdup("-type");
+                prev_option = opt_order[opt_order_len];
+                opt_order_len += 1;
                 if(prev_option == NULL)
                 {
                     printf("find: insufficient memory\n");
@@ -728,8 +762,9 @@ void parse_args(int argc, char** argv)
             }
             else if(strcmp(argv[i], "-exec") == 0)
             {
-                free(prev_option);
-                prev_option = strdup("-exec");
+                opt_order[opt_order_len] = strdup("-exec");
+                prev_option = opt_order[opt_order_len];
+                opt_order_len += 1;
                 if(prev_option == NULL)
                 {
                     printf("find: insufficient memory\n");
@@ -741,8 +776,9 @@ void parse_args(int argc, char** argv)
             }
             else if(strcmp(argv[i], "-print") == 0)
             {
-                free(prev_option);
-                prev_option = strdup("-mtime");
+                opt_order[opt_order_len] = strdup("-print");
+                prev_option = opt_order[opt_order_len];
+                opt_order_len += 1;
                 if(prev_option == NULL)
                 {
                     printf("find: insufficient memory\n");
@@ -783,7 +819,6 @@ void parse_args(int argc, char** argv)
         }
         base_path_to_file_data(copy);
     }
-    free(prev_option);
 }
 
 int main(int argc, char** argv)
@@ -832,8 +867,15 @@ int main(int argc, char** argv)
         free(base_dirs[i].path);
         free(base_dirs[i].file_name);
     }
+
+    for (int i = 0; i < opt_order_len; i++)
+    {
+        free(opt_order[i]);
+    }
+
     free(base_dirs);
     free(desired_modes);
     free(exec_args);
+    free(opt_order);
     return 0;
 }
